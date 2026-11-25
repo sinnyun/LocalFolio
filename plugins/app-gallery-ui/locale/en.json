@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Image Gallery (Demo Plugin)",
+    "description": "Standalone UI plugin consuming shared primitives (Tabs, Button, Empty, Lightbox) and tokens from @folio/core-ui-kit to validate masonry gallery and lightbox interactions."
+  }
+}

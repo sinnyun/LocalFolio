@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "UI 基础组件库",
+    "description": "为所有 LocalFolio 界面插件提供运行期单实例共享的 UI 基础组件（基于 Radix UI 与 lucide-react）、统一主题样式、Portal 弹层容器与 Toast 通知服务（ctx.folioUi）。"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Workbench overlay and floating panels",
+    "description": "Adds a dismissible full-screen workbench over the native DSH UI plus draggable, eight-way resizable, maximizable floating panels that remember their position; other plugins join by registering a workspace or panel on ctx.folioShell."
+  }
+}

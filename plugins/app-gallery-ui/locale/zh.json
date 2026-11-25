@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "图片画廊（测试插件）",
+    "description": "独立业务 UI 插件，完全消费 @folio/core-ui-kit 提供的通用组件（Tabs、Button、Empty、Lightbox）与统一主题样式，验证画廊瀑布流与灯箱交互。"
+  }
+}

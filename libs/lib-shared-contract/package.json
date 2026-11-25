@@ -1,0 +1,17 @@
+{
+  "name": "@folio/lib-shared-contract",
+  "version": "0.3.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./rpc": "./src/rpc-client.ts"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.0",
+    "react": ">=18"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}

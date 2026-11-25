@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "UI Foundation Kit",
+    "description": "Provides runtime-shared UI primitives (Radix UI + lucide-react), scoped host-token styles, shell.overlay portal host, and toast service (ctx.folioUi) for all LocalFolio UI plugins."
+  }
+}

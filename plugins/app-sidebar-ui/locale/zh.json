@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "侧栏导航（sidebar-07 测试插件）",
+    "description": "独立业务 UI 插件，完全消费 @folio/core-ui-kit 的通用 Sidebar、Breadcrumb、Collapsible、DropdownMenu、Sheet 与 Tooltip 组件，验证图标折叠侧栏与主题样式协调。"
+  }
+}

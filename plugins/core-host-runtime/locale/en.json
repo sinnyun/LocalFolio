@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Runtime gateway",
+    "description": "Serves the /lf/* RPC and SSE channel, the action registry, and the plugin manifest service so browser plugins can call Host capabilities, admitting requests by DSH connection identity and same-origin policy."
+  }
+}

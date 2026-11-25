@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Sidebar Navigation (sidebar-07 Demo)",
+    "description": "Standalone UI plugin consuming shared Sidebar, Breadcrumb, Collapsible, DropdownMenu, Sheet, and Tooltip primitives from @folio/core-ui-kit."
+  }
+}

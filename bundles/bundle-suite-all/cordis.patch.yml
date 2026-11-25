@@ -1,0 +1,22 @@
+# LocalFolio Suite Meta-Bundle:
+# Assembles independent @folio/* DSH plugins into one installable workbench.
+# Plugins communicate strictly via Cordis Services (folioStorage / folioRuntime / folioShell) and DSH Slots.
+- insert:
+    - id: core-host-storage
+      name: '@folio/core-host-storage'
+    - id: core-host-runtime
+      name: '@folio/core-host-runtime'
+    - id: core-ui-kit
+      name: '@folio/core-ui-kit'
+    - id: shell-overlay-ui
+      name: '@folio/shell-overlay-ui'
+    - id: shell-settings-ui
+      name: '@folio/shell-settings-ui'
+    - id: app-starter-host
+      name: '@folio/app-starter-host'
+    - id: app-starter-ui
+      name: '@folio/app-starter-ui'
+    - id: app-gallery-ui
+      name: '@folio/app-gallery-ui'
+    - id: app-sidebar-ui
+      name: '@folio/app-sidebar-ui'

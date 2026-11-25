@@ -1,0 +1,48 @@
+{
+  "name": "@folio/shell-overlay-ui",
+  "version": "0.3.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH native client shell plugin: incremental full-screen workbench overlay + draggable/resizable/maximizable floating panels (ctx.folioShell).",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@folio/core-ui-kit",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "external": [
+        "@folio/core-ui-kit"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "locale",
+    "icon.svg"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.0",
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@folio/core-ui-kit": "workspace:*",
+    "@folio/lib-shared-contract": "workspace:*",
+    "react-resizable-panels": "^4.24.1",
+    "zustand": "^5.0.4"
+  },
+  "engines": {
+    "dsh": "^0.2.2-rc.5"
+  }
+}

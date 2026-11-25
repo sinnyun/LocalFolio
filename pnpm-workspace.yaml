@@ -1,0 +1,8 @@
+packages:
+  - bundles/*
+  - plugins/*
+  - libs/*
+
+allowBuilds:
+  esbuild: true
+  '@parcel/watcher': false

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="LocalFolio Suite">
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#181c24"/>
+  <rect x="13" y="14" width="38" height="36" rx="6" fill="none" stroke="#60a5fa" stroke-width="3"/>
+  <path d="M13 25h38M27 25v25" stroke="#60a5fa" stroke-width="3" stroke-linecap="round"/>
+  <rect x="33" y="32" width="12" height="10" rx="2.5" fill="#34d399"/>
+</svg>

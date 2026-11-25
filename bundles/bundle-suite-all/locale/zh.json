@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "LocalFolio 工作台套件",
+    "description": "把 LocalFolio 的增量插件一次装齐：插件隔离存储、/lf RPC 与 SSE 网关、全屏工作台与自由悬浮面板、DSH 设置页「我的插件」治理面板。工作台覆盖在 DSH 原生界面之上但不接管它，按 Esc 或点「返回 DSH」即回到原生界面；数据只写入 %LOCALAPPDATA%/LocalFolio，不碰 DSH 自己的存储与会话目录。",
+    "detail": "docs/DETAIL.md"
+  }
+}

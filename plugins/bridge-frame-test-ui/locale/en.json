@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Frame test workspace",
-    "description": "Bridge test plugin that mounts the base layout frame in the workbench workspace bar: it renders folioFrame.View and registers one demo app so the four-region layout can be inspected and adjusted. Remove it once real workspaces host the frame."
+    "description": "Bridge test plugin that mounts the base layout frame in the workbench workspace bar: it renders folioFrame.View and registers one demo app so the four-region layout can be inspected and adjusted. Remove it once real workspaces host the frame.",
+    "detail": "docs/DETAIL.md"
   }
 }

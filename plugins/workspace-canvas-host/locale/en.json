@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Canvas Workspace Host",
-    "description": "Provides board persistence, link-only image inspection and folder relocation, WIC + Shell LOD image proxy caching, native file/folder pickers, and self-hosted @tldraw/assets serving."
+    "description": "Provides board persistence, link-only image inspection and folder relocation, WIC + Shell LOD image proxy caching, native file/folder pickers, and self-hosted @tldraw/assets serving.",
+    "detail": "docs/DETAIL.md"
   }
 }

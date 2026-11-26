@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "物料工作区后端",
-    "description": "提供本地 VectorCraft CLI 与前台控制通道桥接、A3 横版画板物料信息头双向同步、单图与多页 PDF 导出、文件监听以及默认/项目物料数据管理。"
+    "description": "提供本地 VectorCraft CLI 与前台控制通道桥接、A3 横版画板物料信息头双向同步、单图与多页 PDF 导出、文件监听以及默认/项目物料数据管理。",
+    "detail": "docs/DETAIL.md"
   }
 }

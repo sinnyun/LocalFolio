@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Test Shadcn Admin UI",
-    "description": "Test UI plugin: satnaing/shadcn-admin ported into the workbench to exercise complex layouts and primitive coverage."
+    "description": "Test UI plugin: satnaing/shadcn-admin ported into the workbench to exercise complex layouts and primitive coverage.",
+    "detail": "docs/DETAIL.md"
   }
 }

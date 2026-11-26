@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "测试图片画廊 UI",
-    "description": "测试用 UI 插件：验证瀑布流图片画廊与灯箱交互，全部消费 @folio/base-ui-kit 的通用组件。"
+    "description": "测试用 UI 插件：验证瀑布流图片画廊与灯箱交互，全部消费 @folio/base-ui-kit 的通用组件。",
+    "detail": "docs/DETAIL.md"
   }
 }

@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Base layout frame",
-    "description": "Layout frame shared by every workspace: the frame owns left / center / right / status, a workspace only declares region content. It draws nothing by itself and registers no workspace; a host workspace renders folioFrame.View."
+    "description": "Layout frame shared by every workspace: the frame owns left / center / right / status, a workspace only declares region content. It draws nothing by itself and registers no workspace; a host workspace renders folioFrame.View.",
+    "detail": "docs/DETAIL.md"
   }
 }

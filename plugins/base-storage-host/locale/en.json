@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Base storage capability",
-    "description": "Allocates a private storage space per @folio plugin (%LOCALAPPDATA%/LocalFolio/plugins/<plugin>/data and cache) with schema-validated JSON stores, writing through the DSH filesystem capability when present and falling back to local atomic writes."
+    "description": "Allocates a private storage space per @folio plugin (%LOCALAPPDATA%/LocalFolio/plugins/<plugin>/data and cache) with schema-validated JSON stores, writing through the DSH filesystem capability when present and falling back to local atomic writes.",
+    "detail": "docs/DETAIL.md"
   }
 }

@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Base settings page",
-    "description": "Adds a My plugins page to DSH settings that groups plugins by base capability / workspace / feature / test / bridge and lists embedded extensions separately."
+    "description": "Adds a My plugins page to DSH settings that groups plugins by base capability / workspace / feature / test / bridge and lists embedded extensions separately.",
+    "detail": "docs/DETAIL.md"
   }
 }

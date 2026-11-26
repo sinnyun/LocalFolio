@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "测试侧栏示例 UI",
-    "description": "测试用 UI 插件：验证图标折叠侧栏、面包屑与嵌套菜单，全部消费 @folio/base-ui-kit 的通用组件。"
+    "description": "测试用 UI 插件：验证图标折叠侧栏、面包屑与嵌套菜单，全部消费 @folio/base-ui-kit 的通用组件。",
+    "detail": "docs/DETAIL.md"
   }
 }

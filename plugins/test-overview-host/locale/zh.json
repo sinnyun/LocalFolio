@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "测试概览后端",
-    "description": "测试用 Host 插件：注入 folioRuntime 与 folioStorage，注册带输入校验的动作，并把状态写进自己的插件存储。"
+    "description": "测试用 Host 插件：注入 folioRuntime 与 folioStorage，注册带输入校验的动作，并把状态写进自己的插件存储。",
+    "detail": "docs/DETAIL.md"
   }
 }

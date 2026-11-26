@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Test Studio Admin UI",
-    "description": "Test UI plugin: Studio Admin ported into the workbench to exercise theme presets and layout controls."
+    "description": "Test UI plugin: Studio Admin ported into the workbench to exercise theme presets and layout controls.",
+    "detail": "docs/DETAIL.md"
   }
 }

@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "DSH Interactions Bridge",
-    "description": "Bridges DSH native contextMenus, fileDrag, and fileActions into LocalFolio workspaces via ctx.folioInteractions with clean fallbacks."
+    "description": "Bridges DSH native contextMenus, fileDrag, and fileActions into LocalFolio workspaces via ctx.folioInteractions with clean fallbacks.",
+    "detail": "docs/DETAIL.md"
   }
 }

@@ -1,6 +1,6 @@
 # 外壳只管两层，布局框架管一个 app 内部的区域几何
 
-工作台里有两层容器：外壳（全屏面板、工作区切换、悬浮面板）和一个工作区内部的四区布局。两者最初各自实现过一遍「左 / 中 / 右三栏 + 折叠 + 拖宽 + 持久化 + 每区错误隔离 + 底部信息栏」：外壳用 `ShellLayout`（百分比几何、`react-resizable-panels`、按工作区存 `folio.shell.overlay.v2`），框架用 `FrameWorkbench`（像素几何、手写分隔条、按 app 存 `folio.frame.v1`）。两份区域声明也各有一套字段，`HeaderSlot / LeftPanel / MainView / RightPanel / StatusSlot` 与 `Left / Main / Right / Status` 是同一件事的两种说法。实际只有 `test-overview-ui` 还在用外壳那套，其余四个测试工作区只提供 `MainView`。
+工作台里有两层容器：外壳（全屏面板、工作区切换、悬浮面板）和一个工作区内部的四区布局。两者最初各自实现过一遍「左 / 中 / 右三栏 + 折叠 + 拖宽 + 持久化 + 每区错误隔离 + 底部信息栏」：外壳用 `ShellLayout`（百分比几何、`react-resizable-panels`、按工作区存 `folio.shell.overlay.v2`），框架用 `FrameWorkbench`（像素几何、手写分隔条、按 app 存 `folio.frame.v1`）。两份区域声明也各有一套字段，`HeaderSlot / LeftPanel / MainView / RightPanel / StatusSlot` 与 `Left / Main / Right / Status` 是同一件事的两种说法。做这个决定时，实际只有 `test-overview-ui` 还在用外壳那套，其余四个测试工作区只提供 `MainView`（该插件随后也改成了形态 A，`MainView` 写 `frame.WorkspaceHost`）。
 
 因此外壳收成**两层**：一条顶部栏，和它下面一整块内容区。顶部栏放品牌、返回 DSH、工作区切换（Windows 桌面版不画这条，而是把控件嵌进 DSH 原生标题栏，内容区从原生标题栏下沿 `--dsh-frame-top-clearance` 起占满）。**内容区完全属于工作区**，外壳不画任何区域布局，也不再画底部信息栏 —— 底边归渲染内容的那一方：形态 A 由框架的 `FrameStatusBar` 提供，形态 B 由页面自己决定。
 

@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Materials Workspace Host",
-    "description": "Provides VectorCraft CLI and live control bridge, A3 landscape material header bidirectional sync, image/PDF export, file watching, and default/project material catalog storage."
+    "description": "Provides VectorCraft CLI and live control bridge, A3 landscape material header bidirectional sync, image/PDF export, file watching, and default/project material catalog storage.",
+    "detail": "docs/DETAIL.md"
   }
 }

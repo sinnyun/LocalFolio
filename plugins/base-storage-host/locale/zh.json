@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "基础存储能力",
-    "description": "为每个 @folio 插件分配互不可见的存储空间（%LOCALAPPDATA%/LocalFolio/plugins/<插件>/data 与 cache），并提供带 schema 校验的 JSON Store；底层优先走 DSH 的文件系统能力，不可用时退回本机原子写。"
+    "description": "为每个 @folio 插件分配互不可见的存储空间（%LOCALAPPDATA%/LocalFolio/plugins/<插件>/data 与 cache），并提供带 schema 校验的 JSON Store；底层优先走 DSH 的文件系统能力，不可用时退回本机原子写。",
+    "detail": "docs/DETAIL.md"
   }
 }

@@ -29,7 +29,8 @@
   "files": [
     "lib",
     "locale",
-    "icon.svg"
+    "icon.svg",
+    "docs"
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.0",

@@ -13,3 +13,11 @@ Default five canonical roles, label string equals role name: `needs-triage`, `ne
 ### Domain docs
 
 Single-context layout: root `GLOSSARY.md` plus `docs/adr/`. See `docs/agents/domain.md`.
+
+### Docs map
+
+- `README.md` — architecture, plugin inventory, install and "how to add a workspace" (the checklist at §5.4 is the one to follow).
+- `CHANGELOG.md` — what changed since the last working version; not a release log.
+- `docs/adr/` — why the shell / frame / workspace boundaries are where they are.
+- `plugins/<name>/docs/DETAIL.md` — per-plugin service surface, wiring and limits; linked from the plugin page via `locale/*.json` `meta.detail`.
+

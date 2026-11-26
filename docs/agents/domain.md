@@ -16,9 +16,12 @@ Engineering skills 探索 codebase 时，应如何消费这个 repo 的 domain d
 ```
 /
 ├── GLOSSARY.md
+├── CHANGELOG.md
 ├── docs/adr/
-│   ├── 0001-<decision>.md
-│   └── 0002-<decision>.md
+│   ├── 0001-reuse-dsh-file-capabilities-without-dsh-workspace-model.md
+│   ├── 0002-frame-stays-a-capability-rendered-by-its-host-workspace.md
+│   ├── 0003-shell-owns-window-and-workspace-frame-owns-app-regions.md
+│   └── …（按时间递增编号）
 ├── plugins/        ← pnpm workspace 成员
 ├── libs/
 └── bundles/
@@ -40,4 +43,6 @@ Engineering skills 探索 codebase 时，应如何消费这个 repo 的 domain d
 
 ## 词表与代码的对齐
 
-`工作台 / 工作区 / 功能插件 / 基础能力 / 测试界面 / 桥接` 已经同时在文档与代码里生效：包名前缀是 `base-* / workspace-* / feature-* / test-* / bridge-*`，工作区由 `ctx.folioShell.registerWorkspace` 注册，框架内的四区视图由 `ctx.folioFrame.registerApp` 登记。新增术语前先确认它真的属于这套层级，而不是同一个东西的第二个名字。
+`工作台 / 工作区 / 功能插件 / 基础能力 / 测试界面 / 桥接` 已经同时在文档与代码里生效：包名前缀是 `base-* / workspace-* / feature-* / test-* / bridge-*`，工作区由 `ctx.folioShell.registerWorkspace` 注册，框架内的四区视图由 `ctx.folioFrame.registerApp` 登记，插件分类由 `libs/base-contract/src/manifest.ts` 的 `DshPluginCategory` 枚举钉死，插件清单的默认内容在 `plugins/base-runtime-host/src/host.ts` 的 `createDefaultPluginManifest()`。新增术语前先确认它真的属于这套层级，而不是同一个东西的第二个名字。
+
+新增一个工作区时，有三处必须同步，漏一处就只剩「能跑但看不见」：`bundles/workbench-suite/cordis.patch.yml`（装得上）、`createDefaultPluginManifest()`（设置页显示得出）、`scripts/lfdev.ps1` 的 `$ExpectedClientPlugins`（verify 校验得到）。

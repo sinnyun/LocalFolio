@@ -210,11 +210,11 @@ export function MyPluginsSection({
             }}
           >
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-              二、插件内嵌扩展（静态打包，如 LeaferJS 扩展）
+              二、插件内嵌扩展（静态打包，如 tldraw 画板引擎）
             </div>
             {manifest.internalExtensions.length === 0 ? (
               <div style={{ fontSize: 12, opacity: 0.6 }}>
-                暂未登记内部扩展（后续在 app-canvas-* 接入 LeaferJS 插件时登记在此）
+                暂未登记内部扩展（宿主插件内嵌第三方引擎时登记在此，例如画板工作区的 tldraw）
               </div>
             ) : (
               <ul

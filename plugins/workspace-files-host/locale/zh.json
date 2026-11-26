@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "文件浏览器后端",
-    "description": "提供本地目录浏览、驱动器容量检测、Windows 系统自带缩略图与缓存调用（IShellItemImageFactory）、媒体流传输、文件详情检查以及系统资源管理器定位能力。"
+    "description": "提供本地目录浏览、驱动器容量检测、Windows 系统自带缩略图与缓存调用（IShellItemImageFactory）、媒体流传输、文件详情检查以及系统资源管理器定位能力。",
+    "detail": "docs/DETAIL.md"
   }
 }

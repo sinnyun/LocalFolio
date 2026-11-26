@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "画板工作区后端",
-    "description": "提供画板文档持久化、图片文件链接检查与批量重定位、WIC 与系统缩略图分层 LOD 代理缓存、原生文件选择对话框以及本地 @tldraw/assets 静态资源托管。"
+    "description": "提供画板文档持久化、图片文件链接检查与批量重定位、WIC 与系统缩略图分层 LOD 代理缓存、原生文件选择对话框以及本地 @tldraw/assets 静态资源托管。",
+    "detail": "docs/DETAIL.md"
   }
 }

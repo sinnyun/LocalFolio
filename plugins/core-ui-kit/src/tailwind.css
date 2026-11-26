@@ -34,6 +34,11 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -72,6 +77,11 @@
   --border: var(--dsw-alias-border-l3, rgba(15, 23, 42, 0.14));
   --input: var(--dsw-alias-border-l3, rgba(15, 23, 42, 0.14));
   --ring: var(--dsw-alias-brand-primary, #1b1b1c);
+  --chart-1: var(--dsw-alias-chart-1, oklch(0.87 0 0));
+  --chart-2: var(--dsw-alias-chart-2, oklch(0.556 0 0));
+  --chart-3: var(--dsw-alias-chart-3, oklch(0.439 0 0));
+  --chart-4: var(--dsw-alias-chart-4, oklch(0.371 0 0));
+  --chart-5: var(--dsw-alias-chart-5, oklch(0.269 0 0));
   --radius: var(--dsw-radius-md, 0.625rem);
   --sidebar: var(--dsw-specific-sidebar-fill, #f9fafb);
   --sidebar-foreground: var(--dsw-alias-label-primary, #1b1b1c);

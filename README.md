@@ -54,7 +54,9 @@ F:\AI\geren\LocalFolio\
 │   ├── app-starter-host/          @folio/app-starter-host    独立 Host 业务插件样板
 │   ├── app-starter-ui/            @folio/app-starter-ui      独立 Client 业务插件样板（含工作区 + 悬浮面板示例）
 │   ├── app-gallery-ui/            @folio/app-gallery-ui      独立测试插件：瀑布流图片画廊 + Lightbox（纯消费 core-ui-kit）
-│   └── app-sidebar-ui/            @folio/app-sidebar-ui      独立测试插件：sidebar-07 图标折叠侧栏 + 面包屑（纯消费 core-ui-kit）
+│   ├── app-sidebar-ui/            @folio/app-sidebar-ui      独立测试插件：sidebar-07 图标折叠侧栏 + 面包屑（纯消费 core-ui-kit）
+│   ├── app-admin-ui/              @folio/app-admin-ui        shadcn-admin 移植：仪表盘/任务/用户/应用/聊天/设置/错误页
+│   └── app-studio-ui/             @folio/app-studio-ui       Studio Admin 移植：多主题预设 + 布局控制 + 仪表盘图表/数据表
 ├── libs/
 │   └── lib-shared-contract/       @folio/lib-shared-contract 协议类型与跨 bundle 无单例 RPC Hooks
 └── scripts/

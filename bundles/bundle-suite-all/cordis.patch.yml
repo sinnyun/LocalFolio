@@ -20,3 +20,7 @@
       name: '@folio/app-gallery-ui'
     - id: app-sidebar-ui
       name: '@folio/app-sidebar-ui'
+    - id: app-admin-ui
+      name: '@folio/app-admin-ui'
+    - id: app-studio-ui
+      name: '@folio/app-studio-ui'

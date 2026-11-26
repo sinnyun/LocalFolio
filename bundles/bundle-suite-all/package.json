@@ -33,7 +33,9 @@
     "@folio/app-starter-host": "link:../../plugins/app-starter-host",
     "@folio/app-starter-ui": "link:../../plugins/app-starter-ui",
     "@folio/app-gallery-ui": "link:../../plugins/app-gallery-ui",
-    "@folio/app-sidebar-ui": "link:../../plugins/app-sidebar-ui"
+    "@folio/app-sidebar-ui": "link:../../plugins/app-sidebar-ui",
+    "@folio/app-admin-ui": "link:../../plugins/app-admin-ui",
+    "@folio/app-studio-ui": "link:../../plugins/app-studio-ui"
   },
   "engines": {
     "dsh": "^0.2.2-rc.5"

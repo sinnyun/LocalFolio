@@ -6,3 +6,13 @@ packages:
 allowBuilds:
   esbuild: true
   '@parcel/watcher': false
+
+# The DSH browser platform provides a single React 18 instance; pin workspace
+# peer resolution so radix-ui and friends never install a second React copy.
+overrides:
+  react: 18.3.1
+  react-dom: 18.3.1
+
+# Scripts must not trigger implicit installs: plugin builds are offline and the
+# registry mirror in this environment stalls, which froze `pnpm run build`.
+verifyDepsBeforeRun: false

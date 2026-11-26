@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Shadcn Admin 控制台",
+    "description": "把 satnaing/shadcn-admin 的完整后台界面搬进 LocalFolio 工作台：图标折叠侧栏、命令搜索、主题切换、仪表盘图表、任务与用户数据表、应用集成、聊天收件箱与设置页，全部复用 @folio/core-ui-kit 的共享控件与 DSH 主题令牌。"
+  }
+}

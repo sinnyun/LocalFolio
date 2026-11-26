@@ -1,0 +1,46 @@
+{
+  "name": "@folio/app-studio-ui",
+  "version": "0.3.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "description": "Studio Admin (arhamkhnz/next-shadcn-admin-dashboard) ported into a LocalFolio workspace plugin: collapsible icon sidebar with variants, command search, theme presets, layout controls, dashboard charts and data tables.",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@folio/core-ui-kit",
+        "@folio/shell-overlay-ui"
+      ],
+      "external": [
+        "@folio/core-ui-kit"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "locale",
+    "icon.svg"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.0",
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@folio/core-ui-kit": "workspace:*",
+    "@folio/lib-shared-contract": "workspace:*",
+    "lucide-react": "^0.511.0",
+    "recharts": "^3.8.0"
+  },
+  "engines": {
+    "dsh": "^0.2.2-rc.5"
+  }
+}

@@ -1,4 +1,4 @@
-﻿# LocalFolio Monorepo 隔离验证脚本（默认 profile: lfdev，端口: 3081）。
+# LocalFolio Monorepo 隔离验证脚本（默认 profile: lfdev，端口: 3081）。
 # 通过安装聚合元包 `bundles/bundle-suite-all` 一次性装配整套独立 DSH 插件。
 #
 #   pwsh -File scripts\lfdev.ps1 install     # 将 @folio/bundle-suite-all 以 link: 装入 lfdev
@@ -35,7 +35,9 @@ $ExpectedClientPlugins = @(
   '@folio/shell-settings-ui',
   '@folio/app-starter-ui',
   '@folio/app-gallery-ui',
-  '@folio/app-sidebar-ui'
+  '@folio/app-sidebar-ui',
+  '@folio/app-admin-ui',
+  '@folio/app-studio-ui'
 )
 
 function Invoke-Dsh {

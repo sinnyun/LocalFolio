@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "基础桌面原生能力",
+    "description": "集中提供共享 Windows Shell/WIC 缩略图与图像下采样 Worker 池、系统文件/文件夹选择框、资源管理器定位、默认程序打开与隐藏属性设置。",
+    "detail": "docs/DETAIL.md"
+  }
+}

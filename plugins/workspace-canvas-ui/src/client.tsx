@@ -1,11 +1,13 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {
+  FolioCanvasService,
   FolioFrameService,
   FrameAppDefinition,
   FrameProviderProps,
   WorkspaceUiContribution,
 } from '@folio/base-contract'
 import { PenTool } from 'lucide-react'
+import { createFolioCanvasService } from './canvas-service.js'
 import { CanvasStage } from './components/CanvasStage.js'
 import { CanvasSidebar } from './components/CanvasSidebar.js'
 import { CanvasStatus } from './components/CanvasStatus.js'
@@ -26,11 +28,15 @@ function CanvasMainSlot(): React.ReactElement {
 
 export interface CreateCanvasAppOptions {
   readonly CanvasStageComponent?: React.ComponentType
+  readonly canvasService?: FolioCanvasService
 }
 
 export function createCanvasApp(options: CreateCanvasAppOptions = {}): FrameAppDefinition {
   const Provider = ({ children }: FrameProviderProps) => (
-    <CanvasProvider CanvasStageComponent={options.CanvasStageComponent}>
+    <CanvasProvider
+      CanvasStageComponent={options.CanvasStageComponent}
+      canvasService={options.canvasService}
+    >
       {children}
     </CanvasProvider>
   )
@@ -70,18 +76,23 @@ export const name = 'workspace-canvas-ui'
 export const inject = ['folioFrame', 'folioShell'] as const
 
 export function apply(ctx: Context): void {
+  const canvasService = createFolioCanvasService()
+
   ctx.effect(() => {
     const frame: FolioFrameService = ctx.folioFrame
-    const disposeApp = frame.registerApp(createCanvasApp())
+    const disposeService = ctx.provide('folioCanvas', canvasService)
+    const disposeApp = frame.registerApp(createCanvasApp({ canvasService }))
     const disposeWorkspace = ctx.folioShell.registerWorkspace(createCanvasWorkspace(frame))
     return () => {
       disposeWorkspace()
       disposeApp()
+      disposeService()
     }
-  }, 'workspace-canvas-ui: register canvas workspace and frame app')
+  }, 'workspace-canvas-ui: register canvas workspace, frame app, and folioCanvas service')
 }
 
 export default { name, inject, apply }
+export { createFolioCanvasService } from './canvas-service.js'
 export { useCanvas, CanvasProvider } from './context.js'
 export { LinkedImagesPanel } from './components/LinkedImagesPanel.js'
 export { LocalImagePickerDialog } from './components/LocalImagePickerDialog.js'

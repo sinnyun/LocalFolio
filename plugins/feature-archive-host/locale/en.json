@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "ZPAQ archive host",
+    "description": "Standalone archive feature backend providing managed zpaqfranz installation, deduplicated packing & verification, transparent single-file extraction, and file/archive export.",
+    "detail": "docs/DETAIL.md"
+  }
+}

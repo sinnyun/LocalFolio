@@ -1,4 +1,9 @@
 import * as React from 'react'
+import type {
+  CanvasLinkResolveResult,
+  CanvasLinkSourceProvider,
+  FolioCanvasService,
+} from '@folio/base-contract'
 import { rpcCall, useFolioEvents } from '@folio/base-contract/rpc'
 import { toast } from '@folio/base-ui-kit/client'
 import {
@@ -37,6 +42,9 @@ import type {
 
 const ACTIVE_BOARD_STORAGE_KEY = 'folio.canvas.activeBoard'
 const SAVE_DEBOUNCE_MS = 800
+const EMPTY_LINK_SOURCES: readonly CanvasLinkSourceProvider[] = []
+const GET_EMPTY_LINK_SOURCES = () => EMPTY_LINK_SOURCES
+const NOOP_SUBSCRIBE = () => () => {}
 
 function readStoredActiveBoardId(): string {
   try {
@@ -81,6 +89,7 @@ export interface CanvasContextValue {
   readonly docLoading: boolean
   readonly saveStatus: SaveStatus
   readonly linkedImages: readonly BoardLinkedImageItem[]
+  readonly linkSources: readonly CanvasLinkSourceProvider[]
   readonly brokenCount: number
   readonly relinkPanelOpen: boolean
   readonly relinkFilter: 'all' | 'missing'
@@ -108,6 +117,11 @@ export interface CanvasContextValue {
   markLinkMissingByPath(localPath: string): void
   insertLinkedImages(
     paths: readonly string[],
+    dropPoint?: { readonly x: number; readonly y: number },
+  ): Promise<boolean>
+  canHandleExternalText(text: string): boolean
+  insertFromExternalText(
+    text: string,
     dropPoint?: { readonly x: number; readonly y: number },
   ): Promise<boolean>
   pickAndInsertImages(dropPoint?: { readonly x: number; readonly y: number }): Promise<void>
@@ -142,12 +156,21 @@ export function useCanvas(): CanvasContextValue {
 export interface CanvasProviderProps {
   readonly children: React.ReactNode
   readonly CanvasStageComponent?: React.ComponentType
+  readonly canvasService?: FolioCanvasService
 }
 
 export function CanvasProvider({
   children,
   CanvasStageComponent,
+  canvasService,
 }: CanvasProviderProps): React.ReactElement {
+  const linkSources = React.useSyncExternalStore(
+    canvasService?.subscribe ?? NOOP_SUBSCRIBE,
+    canvasService?.listLinkSources ?? GET_EMPTY_LINK_SOURCES,
+    GET_EMPTY_LINK_SOURCES,
+  )
+  const linkSourcesRef = React.useRef(linkSources)
+  linkSourcesRef.current = linkSources
   const [boards, setBoards] = React.useState<readonly BoardMeta[]>([])
   const [boardsLoading, setBoardsLoading] = React.useState(true)
   const [boardsError, setBoardsError] = React.useState<string | null>(null)
@@ -306,6 +329,7 @@ export function CanvasProvider({
         shapeIds,
         meta,
         status: linkStatusesRef.current[meta.linkId] ?? 'ok',
+        rawMeta: (asset.meta ?? {}) as Readonly<Record<string, unknown>>,
       })
     }
     return items
@@ -597,21 +621,62 @@ export function CanvasProvider({
     )
   }, [updateLinkStatuses])
 
-  const insertLinkedImages = React.useCallback(
+  const resolveLocalPathsWithProviders = React.useCallback(
+    async (paths: readonly string[]): Promise<readonly CanvasLinkResolveResult[]> => {
+      const resolved: Array<{ localPath: string; meta: Record<string, unknown> }> = paths.map(
+        localPath => ({ localPath, meta: {} }),
+      )
+      for (const provider of linkSourcesRef.current) {
+        if (typeof provider.resolveLocalPaths !== 'function') continue
+        try {
+          const results = await provider.resolveLocalPaths(resolved.map(r => r.localPath))
+          for (let idx = 0; idx < resolved.length; idx += 1) {
+            const hit = results[idx]
+            if (!hit) continue
+            resolved[idx] = {
+              localPath: hit.localPath || resolved[idx]!.localPath,
+              meta: hit.meta ? { ...resolved[idx]!.meta, ...hit.meta } : resolved[idx]!.meta,
+            }
+          }
+        } catch (err) {
+          console.warn(
+            `[workspace-canvas-ui] link source "${provider.id}" resolveLocalPaths failed`,
+            err,
+          )
+        }
+      }
+      return resolved
+    },
+    [],
+  )
+
+  const insertResolvedLinkedImages = React.useCallback(
     async (
-      paths: readonly string[],
+      entries: readonly CanvasLinkResolveResult[],
       dropPoint?: { readonly x: number; readonly y: number },
     ): Promise<boolean> => {
       const editor = editorRef.current
-      if (!editor || paths.length === 0) return false
+      if (!editor || entries.length === 0) return false
 
       try {
         const res = await rpcCall<{ readonly items: readonly LinkedImageInspectResult[] }>(
           'canvas.links.inspect',
-          { paths },
+          { paths: entries.map(e => e.localPath) },
         )
-        const validItems = res.items.filter(item => item.exists && item.isImage)
-        if (validItems.length === 0) {
+        const validEntries: Array<{
+          readonly inspected: LinkedImageInspectResult
+          readonly extraMeta?: Readonly<Record<string, unknown>>
+        }> = []
+        res.items.forEach((info, index) => {
+          if (info && info.exists && info.isImage) {
+            validEntries.push({
+              inspected: info,
+              extraMeta: entries[index]?.meta,
+            })
+          }
+        })
+
+        if (validEntries.length === 0) {
           toast({
             title: '未找到可用的本地图片文件',
             description: '请选择常见的图片格式（PNG / JPG / WebP / GIF / SVG 等）。',
@@ -630,7 +695,7 @@ export function CanvasProvider({
           props: { assetId: TLAssetId; w: number; h: number }
         }> = []
 
-        validItems.forEach((info, index) => {
+        validEntries.forEach(({ inspected: info, extraMeta }, index) => {
           const linkId = createLinkId()
           const { assetW, assetH, shapeW, shapeH } = computeCanvasImageGeometry(
             info.naturalWidth,
@@ -653,6 +718,7 @@ export function CanvasProvider({
               fileSize: info.size,
             },
             meta: {
+              ...((extraMeta ?? {}) as JsonObject),
               folioLink: true,
               linkId,
               localPath: info.path,
@@ -703,6 +769,60 @@ export function CanvasProvider({
     [checkAllLinksWithItems, refreshCacheStats, saveNow, syncLinkedImagesFromEditor],
   )
 
+  const insertLinkedImages = React.useCallback(
+    async (
+      paths: readonly string[],
+      dropPoint?: { readonly x: number; readonly y: number },
+    ): Promise<boolean> => {
+      if (paths.length === 0) return false
+      const resolved = await resolveLocalPathsWithProviders(paths)
+      return insertResolvedLinkedImages(resolved, dropPoint)
+    },
+    [insertResolvedLinkedImages, resolveLocalPathsWithProviders],
+  )
+
+  const canHandleExternalText = React.useCallback(
+    (text: string): boolean =>
+      linkSourcesRef.current.some(
+        provider =>
+          typeof provider.canHandleExternalText === 'function' &&
+          provider.canHandleExternalText(text),
+      ),
+    [],
+  )
+
+  const insertFromExternalText = React.useCallback(
+    async (
+      text: string,
+      dropPoint?: { readonly x: number; readonly y: number },
+    ): Promise<boolean> => {
+      const collected: CanvasLinkResolveResult[] = []
+      for (const provider of linkSourcesRef.current) {
+        if (typeof provider.resolveExternalText !== 'function') continue
+        if (
+          typeof provider.canHandleExternalText === 'function' &&
+          !provider.canHandleExternalText(text)
+        ) {
+          continue
+        }
+        try {
+          const items = await provider.resolveExternalText(text)
+          if (items && items.length > 0) {
+            collected.push(...items)
+          }
+        } catch (err) {
+          console.warn(
+            `[workspace-canvas-ui] link source "${provider.id}" resolveExternalText failed`,
+            err,
+          )
+        }
+      }
+      if (collected.length === 0) return false
+      return insertResolvedLinkedImages(collected, dropPoint)
+    },
+    [insertResolvedLinkedImages],
+  )
+
   const pickAndInsertImages = React.useCallback(
     async (dropPoint?: { readonly x: number; readonly y: number }) => {
       try {
@@ -726,7 +846,12 @@ export function CanvasProvider({
   )
 
   const applyRelinkToEditor = React.useCallback(
-    (assetId: string, inspected: LinkedImageInspectResult): boolean => {
+    (
+      assetId: string,
+      inspected: LinkedImageInspectResult,
+      extraMeta?: Readonly<Record<string, unknown>>,
+      keysToStrip?: readonly string[],
+    ): boolean => {
       const editor = editorRef.current
       if (!editor) return false
 
@@ -740,6 +865,13 @@ export function CanvasProvider({
         inspected.naturalWidth,
         inspected.naturalHeight,
       )
+
+      const nextMetaBase: Record<string, unknown> = { ...(assetRecord.meta ?? {}) }
+      if (keysToStrip) {
+        for (const key of keysToStrip) {
+          delete nextMetaBase[key]
+        }
+      }
 
       const referencingShapes = editor
         .getCurrentPageShapes()
@@ -762,7 +894,8 @@ export function CanvasProvider({
               isAnimated: inspected.ext === '.gif',
             },
             meta: {
-              ...(assetRecord.meta ?? {}),
+              ...(nextMetaBase as JsonObject),
+              ...((extraMeta ?? {}) as JsonObject),
               folioLink: true,
               linkId,
               localPath: inspected.path,
@@ -800,9 +933,11 @@ export function CanvasProvider({
   const relinkAsset = React.useCallback(
     async (assetId: string, newLocalPath: string): Promise<boolean> => {
       try {
+        const [resolved] = await resolveLocalPathsWithProviders([newLocalPath])
+        const targetPath = resolved?.localPath ?? newLocalPath
         const res = await rpcCall<{ readonly items: readonly LinkedImageInspectResult[] }>(
           'canvas.links.inspect',
-          { paths: [newLocalPath] },
+          { paths: [targetPath] },
         )
         const inspected = res.items[0]
         if (!inspected || !inspected.exists || !inspected.isImage) {
@@ -814,7 +949,14 @@ export function CanvasProvider({
           return false
         }
 
-        const updated = applyRelinkToEditor(assetId, inspected)
+        const keysToStrip: string[] = []
+        for (const provider of linkSourcesRef.current) {
+          if (provider.ownedMetaKeys) {
+            keysToStrip.push(...provider.ownedMetaKeys)
+          }
+        }
+
+        const updated = applyRelinkToEditor(assetId, inspected, resolved?.meta, keysToStrip)
         if (!updated) return false
 
         const nextItems = syncLinkedImagesFromEditor()
@@ -836,6 +978,7 @@ export function CanvasProvider({
       applyRelinkToEditor,
       checkAllLinksWithItems,
       refreshCacheStats,
+      resolveLocalPathsWithProviders,
       saveNow,
       syncLinkedImagesFromEditor,
     ],
@@ -984,12 +1127,14 @@ export function CanvasProvider({
   const buildLinkedAssetPayload = React.useCallback(
     (
       inspected: LinkedImageInspectResult,
+      extraMeta?: Readonly<Record<string, unknown>>,
     ): { readonly src: string; readonly meta: JsonObject } => {
       const linkId = createLinkId()
       updateLinkStatuses(prev => ({ ...prev, [linkId]: 'ok' }))
       return {
         src: buildFolioLinkSrc(linkId),
         meta: {
+          ...((extraMeta ?? {}) as JsonObject),
           folioLink: true,
           linkId,
           localPath: inspected.path,
@@ -1008,17 +1153,19 @@ export function CanvasProvider({
 
   const linkElectronDroppedFile = React.useCallback(
     async (_asset: TLAsset, localPath: string) => {
+      const [resolved] = await resolveLocalPathsWithProviders([localPath])
+      const targetPath = resolved?.localPath ?? localPath
       const res = await rpcCall<{ readonly items: readonly LinkedImageInspectResult[] }>(
         'canvas.links.inspect',
-        { paths: [localPath] },
+        { paths: [targetPath] },
       )
       const inspected = res.items[0]
       if (!inspected || !inspected.exists || !inspected.isImage) {
         throw new Error('拖拽的文件不存在或不是受支持的图片格式')
       }
-      return buildLinkedAssetPayload(inspected)
+      return buildLinkedAssetPayload(inspected, resolved?.meta)
     },
-    [buildLinkedAssetPayload],
+    [buildLinkedAssetPayload, resolveLocalPathsWithProviders],
   )
 
   const importWebFile = React.useCallback(
@@ -1096,6 +1243,7 @@ export function CanvasProvider({
       docLoading,
       saveStatus,
       linkedImages,
+      linkSources,
       brokenCount,
       relinkPanelOpen,
       relinkFilter,
@@ -1122,6 +1270,8 @@ export function CanvasProvider({
       getLinkStatus,
       markLinkMissingByPath,
       insertLinkedImages,
+      canHandleExternalText,
+      insertFromExternalText,
       pickAndInsertImages,
       relinkAsset,
       pickAndRelinkImage,
@@ -1146,6 +1296,7 @@ export function CanvasProvider({
       docLoading,
       saveStatus,
       linkedImages,
+      linkSources,
       brokenCount,
       relinkPanelOpen,
       relinkFilter,
@@ -1167,6 +1318,8 @@ export function CanvasProvider({
       getLinkStatus,
       markLinkMissingByPath,
       insertLinkedImages,
+      canHandleExternalText,
+      insertFromExternalText,
       pickAndInsertImages,
       relinkAsset,
       pickAndRelinkImage,

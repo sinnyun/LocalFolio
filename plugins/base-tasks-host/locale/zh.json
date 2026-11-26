@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "基础后台任务能力",
+    "description": "提供有界并发队列、Node Worker 线程执行封装、可暂停/取消的后台任务状态机，以及 200ms 节流的 SSE 进度推送。",
+    "detail": "docs/DETAIL.md"
+  }
+}

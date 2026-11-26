@@ -6,14 +6,25 @@ export * from './frame.js'
 export * from './manifest.js'
 export * from './ui-service.js'
 export * from './interactions.js'
+export * from './tasks.js'
+export * from './native.js'
+export * from './thumbs.js'
+export * from './canvas.js'
+export * from './projects.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
     folioStorage: import('./storage.js').FolioStorageService
     folioRuntime: import('./runtime.js').FolioRuntimeService
+    folioTasks: import('./tasks.js').FolioTasksService
+    folioNative: import('./native.js').FolioNativeService
+    folioThumbs: import('./thumbs.js').FolioThumbsService
     folioShell: import('./shell.js').FolioShellService
     folioFrame: import('./frame.js').FolioFrameService
     folioUi: import('./ui-service.js').FolioUiService
+    folioCanvas: import('./canvas.js').FolioCanvasService
+    folioProjects: import('./projects.js').FolioProjectsUiService
+    folioProjectsHost?: import('./projects.js').FolioProjectsHostService
     folioInteractions?: import('./interactions.js').FolioInteractionsService
     effect(execute: () => (() => void) | void, label?: string): () => void
 

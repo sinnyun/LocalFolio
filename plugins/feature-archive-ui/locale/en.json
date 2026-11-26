@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "ZPAQ archive UI extension",
+    "description": "Registers one-click zpaqfranz installation, archive packing/verification/restore, file extraction, and archive export controls onto Project Library.",
+    "detail": "docs/DETAIL.md"
+  }
+}

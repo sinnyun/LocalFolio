@@ -106,7 +106,14 @@ export interface InvalidateEvent {
   readonly ts: number
 }
 
+export interface RuntimeTopicEvent {
+  readonly topic: string
+  readonly payload: unknown
+  readonly ts: number
+}
+
 export interface EventBus {
   emitInvalidate(scope: string, target?: string): void
+  emitEvent(topic: string, payload: unknown): void
   subscriberCount(): number
 }

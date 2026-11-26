@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "画板 Eagle 链接",
+    "description": "向画板注册 Eagle 来源解析与链接面板扩展：从 Eagle 拖放图片或深链接时自动转换成画板本地文件链接、持久化 Eagle 来源字段，并在链接面板中展示详情与「在 Eagle 中打开」按钮。",
+    "detail": "docs/DETAIL.md"
+  }
+}

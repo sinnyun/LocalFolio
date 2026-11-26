@@ -1,7 +1,8 @@
 import * as React from 'react'
-import type { FolioErrorPayload, InvalidateEvent } from './action.js'
+import type { FolioErrorPayload, InvalidateEvent, RuntimeTopicEvent } from './action.js'
 
 const INVALIDATE_EVENT_NAME = 'folio:invalidate'
+const TOPIC_EVENT_NAME = 'folio:topic'
 
 export class RpcError extends Error {
   readonly code: string
@@ -73,6 +74,11 @@ export function actionScopeOf(actionId: string): string {
 export function dispatchFolioInvalidate(event: InvalidateEvent): void {
   if (typeof window === 'undefined') return
   window.dispatchEvent(new CustomEvent<InvalidateEvent>(INVALIDATE_EVENT_NAME, { detail: event }))
+}
+
+export function dispatchFolioTopic(event: RuntimeTopicEvent): void {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent<RuntimeTopicEvent>(TOPIC_EVENT_NAME, { detail: event }))
 }
 
 export interface UseActionQueryOptions {
@@ -289,6 +295,17 @@ export function useFolioEvents(options: UseFolioEventsOptions = {}): void {
         }
       })
 
+      es.addEventListener('topic', (ev: Event) => {
+        const messageEvent = ev as MessageEvent<string>
+        try {
+          const parsed = JSON.parse(messageEvent.data) as RuntimeTopicEvent
+          if (!parsed || typeof parsed.topic !== 'string') return
+          dispatchFolioTopic(parsed)
+        } catch {
+          // ignore malformed event payload
+        }
+      })
+
       es.onerror = () => {
         if (disposed) return
         if (es.readyState === EventSource.CLOSED || es.readyState === 2) {
@@ -310,6 +327,30 @@ export function useFolioEvents(options: UseFolioEventsOptions = {}): void {
       source = null
     }
   }, [enabled, baseUrl, prefix, reconnectBaseMs])
+}
+
+export function useFolioTopic<T = unknown>(
+  topic: string,
+  handler: (payload: T, event: RuntimeTopicEvent) => void,
+  enabled = true,
+): void {
+  const handlerRef = React.useRef(handler)
+  handlerRef.current = handler
+
+  React.useEffect(() => {
+    if (!enabled || typeof window === 'undefined') return undefined
+    const onTopic = (ev: Event): void => {
+      const detail = (ev as CustomEvent<RuntimeTopicEvent>).detail
+      if (!detail || typeof detail.topic !== 'string') return
+      if (topic === '*' || detail.topic === topic) {
+        handlerRef.current(detail.payload as T, detail)
+      }
+    }
+    window.addEventListener(TOPIC_EVENT_NAME, onTopic)
+    return () => {
+      window.removeEventListener(TOPIC_EVENT_NAME, onTopic)
+    }
+  }, [topic, enabled])
 }
 
 export interface FolioQueryProviderProps {

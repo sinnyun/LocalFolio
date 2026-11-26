@@ -113,6 +113,7 @@ export interface BoardLinkedImageItem {
   readonly shapeIds: readonly string[]
   readonly meta: FolioLinkMeta
   readonly status: LinkStatus
+  readonly rawMeta: Readonly<Record<string, unknown>>
 }
 
 export type PickerMode = 'insert' | 'relink' | 'relocate-folder'

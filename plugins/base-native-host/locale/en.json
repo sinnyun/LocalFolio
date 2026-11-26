@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Base native desktop capability",
+    "description": "Centralizes shared Windows Shell/WIC thumbnail & downsampling worker pool, native file/folder pickers, OS explorer reveal, default-app open, and hidden attribute helpers.",
+    "detail": "docs/DETAIL.md"
+  }
+}

@@ -123,6 +123,14 @@ defaultLayout: { leftWidth: 248, leftCollapsed: false },
 - Host 负责：画板索引与文档落盘、快照净化、链接检查与批量重定位、LOD 代理图渲染与缓存、tldraw 静态资源托管、原生对话框、导入落盘。渲染与缓存细节见 Host 文档，这里不复述。
 - 一句话边界：**界面从不读写用户图片字节**（浏览器拖入的除外，那也是交给 Host 落盘后再变成普通链接）。
 
+## 扩展服务（`ctx.folioCanvas`）
+
+`workspace-canvas-ui` 向外提供 `folioCanvas` Cordis 服务（`FolioCanvasService`）：功能插件可在不直接 import 画板包的情况下注册 `CanvasLinkSourceProvider`，扩展：
+
+- `resolveLocalPaths`：在拖入或重选本地图片路径时解析附加来源元数据（存入 asset `meta`）；
+- `canHandleExternalText` / `resolveExternalText`：认领外部文本或 URL（如特定应用的深链接）并转换成标准本地文件链接；
+- `renderLinkedItemDetails` / `renderLinkedItemActions`：向右侧「图片链接管理」面板注入条目详情与附加操作按钮。
+
 ## 限制与边界
 
 - 画板里只有本地绝对路径：原图被移动或删除时界面只能报失效并重选，不会去猜新位置（`批量重定位` 是显式操作）。

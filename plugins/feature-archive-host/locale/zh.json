@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "ZPAQ 归档备份后端",
+    "description": "提供独立的 zpaqfranz 归档引擎管理与一键下载、去重打包校验、按需单文件无感提取与导出能力，与缩略图及项目索引插件解耦。",
+    "detail": "docs/DETAIL.md"
+  }
+}

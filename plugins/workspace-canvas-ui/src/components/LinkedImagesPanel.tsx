@@ -1,4 +1,5 @@
 import * as React from 'react'
+import type { CanvasLinkedItemInfo } from '@folio/base-contract'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -35,6 +36,7 @@ export function LinkedImagesPanel(): React.ReactElement | null {
     relinkFilter,
     setRelinkFilter,
     linkedImages,
+    linkSources,
     brokenCount,
     cacheStats,
     checkAllLinks,
@@ -52,6 +54,23 @@ export function LinkedImagesPanel(): React.ReactElement | null {
     relinkFilter === 'missing'
       ? linkedImages.filter(item => item.status === 'missing')
       : linkedImages
+
+  const toItemInfo = (item: (typeof linkedImages)[number]): CanvasLinkedItemInfo => ({
+    assetId: item.assetId,
+    shapeIds: item.shapeIds,
+    linkId: item.meta.linkId,
+    localPath: item.meta.localPath,
+    fileName: item.meta.fileName,
+    fileSize: item.meta.fileSize,
+    mtimeMs: item.meta.mtimeMs,
+    naturalWidth: item.meta.naturalWidth,
+    naturalHeight: item.meta.naturalHeight,
+    mime: item.meta.mime,
+    relinkRev: item.meta.relinkRev,
+    status: item.status,
+    rawMeta: item.rawMeta,
+  })
+  const allItemInfos = linkedImages.map(toItemInfo)
 
   return (
     <aside
@@ -183,6 +202,21 @@ export function LinkedImagesPanel(): React.ReactElement | null {
               item.meta.naturalWidth && item.meta.naturalHeight
                 ? `${item.meta.naturalWidth}×${item.meta.naturalHeight}`
                 : '未知尺寸'
+            const itemInfo: CanvasLinkedItemInfo = {
+              assetId: item.assetId,
+              shapeIds: item.shapeIds,
+              linkId: item.meta.linkId,
+              localPath: item.meta.localPath,
+              fileName: item.meta.fileName,
+              fileSize: item.meta.fileSize,
+              mtimeMs: item.meta.mtimeMs,
+              naturalWidth: item.meta.naturalWidth,
+              naturalHeight: item.meta.naturalHeight,
+              mime: item.meta.mime,
+              relinkRev: item.meta.relinkRev,
+              status: item.status,
+              rawMeta: item.rawMeta,
+            }
 
             return (
               <div
@@ -244,7 +278,15 @@ export function LinkedImagesPanel(): React.ReactElement | null {
                     {item.meta.localPath}
                   </div>
 
-                  <div className="flex items-center gap-1 pt-0.5">
+                  {linkSources.map(provider =>
+                    provider.renderLinkedItemDetails ? (
+                      <React.Fragment key={provider.id}>
+                        {provider.renderLinkedItemDetails(itemInfo)}
+                      </React.Fragment>
+                    ) : null,
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-1 pt-0.5">
                     <Button
                       type="button"
                       size="xs"
@@ -277,6 +319,13 @@ export function LinkedImagesPanel(): React.ReactElement | null {
                         <FolderOpen size={12} />
                       </Button>
                     ) : null}
+                    {linkSources.map(provider =>
+                      provider.renderLinkedItemActions ? (
+                        <React.Fragment key={provider.id}>
+                          {provider.renderLinkedItemActions(itemInfo)}
+                        </React.Fragment>
+                      ) : null,
+                    )}
                   </div>
                 </div>
               </div>
@@ -284,6 +333,12 @@ export function LinkedImagesPanel(): React.ReactElement | null {
           })
         )}
       </div>
+
+      {linkSources.map(provider =>
+        provider.renderPanelExtra ? (
+          <React.Fragment key={provider.id}>{provider.renderPanelExtra(allItemInfos)}</React.Fragment>
+        ) : null,
+      )}
 
       <div className="flex items-center justify-between gap-2 border-t border-border bg-muted/30 px-3 py-1.5 text-[10px] text-muted-foreground">
         <span className="truncate tabular-nums">

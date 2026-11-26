@@ -1,4 +1,5 @@
 import fsp from 'node:fs/promises'
+import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -204,5 +205,57 @@ describe('@folio/base-runtime-host', () => {
       }),
     )
     expect(afterDispose.status).toBe(404)
+  })
+
+  it('keeps ctx.signal un-aborted across POST body read and async action execution in nodeHandler', async () => {
+    let abortedAtStart = true
+    let abortedAfterYield = true
+
+    const off = runtime.registerAction(
+      defineAction({
+        id: 'demo.asyncSignal',
+        title: '异步信号测试',
+        tier: 'modify',
+        input: z.object({ value: z.string() }),
+        run: async (input, ctx) => {
+          abortedAtStart = Boolean(ctx.signal?.aborted)
+          await new Promise(r => setTimeout(r, 20))
+          abortedAfterYield = Boolean(ctx.signal?.aborted)
+          return { echoed: input.value, abortedAfterYield }
+        },
+      }),
+    )
+
+    const server = http.createServer((req, res) => {
+      void runtime.rpc.nodeHandler(req, res)
+    })
+
+    await new Promise<void>(resolve => {
+      server.listen(0, '127.0.0.1', () => resolve())
+    })
+
+    try {
+      const addr = server.address() as { port: number }
+      const res = await fetch(`http://127.0.0.1:${addr.port}/lf/rpc/demo.asyncSignal`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-test-auth': 'ok',
+        },
+        body: JSON.stringify({ value: 'hello' }),
+      })
+      expect(res.status).toBe(200)
+      const json = (await res.json()) as {
+        ok: boolean
+        data: { echoed: string; abortedAfterYield: boolean }
+      }
+      expect(json.ok).toBe(true)
+      expect(json.data.echoed).toBe('hello')
+      expect(abortedAtStart).toBe(false)
+      expect(abortedAfterYield).toBe(false)
+    } finally {
+      off()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
   })
 })

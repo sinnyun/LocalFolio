@@ -45,6 +45,20 @@ function discoverPlugins() {
       const clientEntry = path.join(srcDir, 'client.tsx')
       const tailwindInput = path.join(srcDir, 'tailwind.css')
       const tailwindOutput = path.join(srcDir, 'tailwind.generated.css')
+      const outDir = path.join(dir, 'lib')
+      const workerEntries = fs.existsSync(srcDir)
+        ? fs
+            .readdirSync(srcDir, { withFileTypes: true })
+            .filter(entry => entry.isFile() && entry.name.endsWith('.worker.ts'))
+            .map(entry => {
+              const stem = entry.name.slice(0, -'.worker.ts'.length)
+              return {
+                name: `${stem}.worker`,
+                entry: path.join(srcDir, entry.name),
+                outfile: path.join(outDir, `${stem}.worker.js`),
+              }
+            })
+        : []
       const declaredExternals = Array.isArray(pkg.dsh?.client?.external)
         ? pkg.dsh.client.external
         : []
@@ -53,7 +67,7 @@ function discoverPlugins() {
         dir,
         name: pkg.name,
         srcDir,
-        outDir: path.join(dir, 'lib'),
+        outDir,
         hasHost: fs.existsSync(hostEntry),
         hasClient: fs.existsSync(clientEntry),
         hasTailwind: fs.existsSync(tailwindInput),
@@ -61,6 +75,7 @@ function discoverPlugins() {
         tailwindOutput,
         hostEntry,
         clientEntry,
+        workerEntries,
         clientExternals: Array.from(new Set([...DSH_CLIENT_EXTERNALS, ...declaredExternals])),
       }
     })
@@ -100,6 +115,29 @@ function hostOptions(plugin) {
   return {
     entryPoints: [plugin.hostEntry],
     outfile: path.join(plugin.outDir, 'index.js'),
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'node22',
+    legalComments: 'none',
+    banner: {
+      js: [
+        "import { createRequire as __lfCreateRequire } from 'node:module';",
+        "import { fileURLToPath as __lfFileURLToPath } from 'node:url';",
+        "import { dirname as __lfDirname } from 'node:path';",
+        'const require = __lfCreateRequire(import.meta.url);',
+        'const __filename = __lfFileURLToPath(import.meta.url);',
+        'const __dirname = __lfDirname(__filename);',
+      ].join(' '),
+    },
+    external: ['@deepseek-ai/*'],
+  }
+}
+
+function workerOptions(workerEntry) {
+  return {
+    entryPoints: [workerEntry.entry],
+    outfile: workerEntry.outfile,
     bundle: true,
     format: 'esm',
     platform: 'node',
@@ -205,6 +243,14 @@ for (const plugin of plugins) {
     )
   }
 
+  for (const workerEntry of plugin.workerEntries) {
+    if (watchMode) {
+      watchContexts.push(await esbuild.context(workerOptions(workerEntry)))
+    } else {
+      await esbuild.build(workerOptions(workerEntry))
+    }
+  }
+
   if (plugin.hasClient) {
     if (watchMode) {
       const ctx = await esbuild.context(
@@ -232,6 +278,7 @@ if (watchMode) {
     .map(p => {
       const parts = []
       if (p.hasHost) parts.push('host')
+      if (p.workerEntries.length > 0) parts.push(`workers:${p.workerEntries.length}`)
       if (p.hasClient) {
         const sizeKb = (fs.statSync(path.join(p.outDir, 'client.js')).size / 1024).toFixed(1)
         parts.push(`client:${sizeKb}KB`)

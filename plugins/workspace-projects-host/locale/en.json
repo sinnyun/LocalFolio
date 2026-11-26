@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Project library host",
+    "description": "Provides Worker-thread library scanning, in-place .folio-meta manifests and dual-size thumbnail caches, lightweight size+mtimeMs change detection, and a fast global index.",
+    "detail": "docs/DETAIL.md"
+  }
+}

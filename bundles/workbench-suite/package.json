@@ -27,6 +27,9 @@
   "dependencies": {
     "@folio/base-storage-host": "link:../../plugins/base-storage-host",
     "@folio/base-runtime-host": "link:../../plugins/base-runtime-host",
+    "@folio/base-tasks-host": "link:../../plugins/base-tasks-host",
+    "@folio/base-native-host": "link:../../plugins/base-native-host",
+    "@folio/base-thumbs-host": "link:../../plugins/base-thumbs-host",
     "@folio/base-ui-kit": "link:../../plugins/base-ui-kit",
     "@folio/base-shell-ui": "link:../../plugins/base-shell-ui",
     "@folio/bridge-dsh-interactions-ui": "link:../../plugins/bridge-dsh-interactions-ui",
@@ -35,10 +38,16 @@
     "@folio/bridge-frame-test-ui": "link:../../plugins/bridge-frame-test-ui",
     "@folio/workspace-canvas-host": "link:../../plugins/workspace-canvas-host",
     "@folio/workspace-canvas-ui": "link:../../plugins/workspace-canvas-ui",
+    "@folio/feature-canvas-eagle-host": "link:../../plugins/feature-canvas-eagle-host",
+    "@folio/feature-canvas-eagle-ui": "link:../../plugins/feature-canvas-eagle-ui",
     "@folio/workspace-files-host": "link:../../plugins/workspace-files-host",
     "@folio/workspace-files-ui": "link:../../plugins/workspace-files-ui",
     "@folio/workspace-materials-host": "link:../../plugins/workspace-materials-host",
-    "@folio/workspace-materials-ui": "link:../../plugins/workspace-materials-ui"
+    "@folio/workspace-materials-ui": "link:../../plugins/workspace-materials-ui",
+    "@folio/workspace-projects-host": "link:../../plugins/workspace-projects-host",
+    "@folio/workspace-projects-ui": "link:../../plugins/workspace-projects-ui",
+    "@folio/feature-archive-host": "link:../../plugins/feature-archive-host",
+    "@folio/feature-archive-ui": "link:../../plugins/feature-archive-ui"
   },
   "engines": {
     "dsh": "^0.2.2-rc.5"

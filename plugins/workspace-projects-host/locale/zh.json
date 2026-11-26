@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "项目库后端",
+    "description": "提供归档项目库目录的后台 Worker 扫描、.folio-meta 就地元数据与双尺寸缩略图缓存、轻量级 size+mtimeMs 变更检测以及毫秒级全局索引。",
+    "detail": "docs/DETAIL.md"
+  }
+}

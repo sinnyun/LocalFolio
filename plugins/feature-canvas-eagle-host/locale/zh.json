@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "画板 Eagle 链接后端",
+    "description": "解析从 Eagle 拖入画板的 .info 原图与 eagle://item/{id} 链接，读取本地 Eagle Web API 元数据并提供在 Eagle 中定位打开能力。",
+    "detail": "docs/DETAIL.md"
+  }
+}

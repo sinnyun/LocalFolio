@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Project library",
+    "description": "High-performance local archive Project Library workspace with instant global index, virtualized project sidebar, collapsible folder-grouped card grid, lazy thumbnails, change detection, and live task status.",
+    "detail": "docs/DETAIL.md"
+  }
+}

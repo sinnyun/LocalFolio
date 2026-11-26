@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Canvas Eagle Links",
+    "description": "Registers Eagle link resolution and LinkedImagesPanel extensions onto the Canvas workspace: converts Eagle image drops and deep links into canvas file links, persists Eagle metadata, and lets users open linked items in Eagle.",
+    "detail": "docs/DETAIL.md"
+  }
+}

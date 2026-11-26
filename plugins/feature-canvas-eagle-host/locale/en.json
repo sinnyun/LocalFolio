@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Canvas Eagle Links Host",
+    "description": "Resolves Eagle .info image drops and eagle://item/{id} deep links via the local Eagle Web API and dispatches eagle://item/{id} open requests.",
+    "detail": "docs/DETAIL.md"
+  }
+}

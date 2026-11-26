@@ -14,9 +14,16 @@ let checked = 0
 for (const entry of fs.readdirSync(pluginsDir, { withFileTypes: true })) {
   if (!entry.isDirectory()) continue
   const libDir = path.join(pluginsDir, entry.name, 'lib')
-  for (const file of ['index.js', 'client.js']) {
-    const full = path.join(libDir, file)
-    if (!fs.existsSync(full)) continue
+  if (!fs.existsSync(libDir)) continue
+  const targets = fs
+    .readdirSync(libDir, { withFileTypes: true })
+    .filter(
+      item =>
+        item.isFile() &&
+        (item.name === 'index.js' || item.name === 'client.js' || item.name.endsWith('.worker.js')),
+    )
+    .map(item => path.join(libDir, item.name))
+  for (const full of targets) {
     execFileSync(process.execPath, ['--check', full], { stdio: 'inherit' })
     checked += 1
   }

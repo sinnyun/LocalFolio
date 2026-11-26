@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Base thumbnail generator",
+    "description": "Provides an extensible multi-format thumbnail generation engine (folioThumbs) with pluggable providers for easy format expansion.",
+    "detail": "docs/DETAIL.md"
+  }
+}

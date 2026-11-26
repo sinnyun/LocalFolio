@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "基础缩略图生成能力",
+    "description": "提供可扩展的多格式缩略图生成引擎（folioThumbs），支持注册更多格式解析器（如 3D/CAD/RAW/工程文件），与各工作区缩略图存储展示解耦。",
+    "detail": "docs/DETAIL.md"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "ZPAQ 归档管理扩展",
+    "description": "向项目库工作区注册 zpaqfranz 引擎一键下载安装、安全去重打包、完整性校验、单文件提取导出与归档包导出界面。",
+    "detail": "docs/DETAIL.md"
+  }
+}

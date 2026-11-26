@@ -13,8 +13,12 @@ LocalFolio 的能力演进记录。
 ### 新增
 
 - **文件浏览器工作区** `@folio/workspace-files-host` + `@folio/workspace-files-ui`（首个正式产品工作区，形态 A）：快捷文件夹与驱动器容量、懒加载文件树、双栏浏览与可编辑面包屑、Windows 系统缩略图、音视频区间流播放、文本/代码预览、文件检查器。
-- **画板工作区** `@folio/workspace-canvas-host` + `@folio/workspace-canvas-ui`（形态 A）：tldraw 无限画布；图片只存本地文件链接；分层 LOD 代理渲染（256/512/1024/2048）；浏览器拖入自动导入托管；断链检测与批量重定位。（[ADR-0005](docs/adr/0005-canvas-stores-file-links-with-layered-lod-proxies.md)）
+- **画板工作区** `@folio/workspace-canvas-host` + `@folio/workspace-canvas-ui`（形态 A）：tldraw 无限画布；图片只存本地文件链接；分层 LOD 代理渲染（256/512/1024/2048）；浏览器拖入自动导入托管；断链检测与批量重定位；并向功能插件开放 `ctx.folioCanvas` 链接扩展服务。（[ADR-0005](docs/adr/0005-canvas-stores-file-links-with-layered-lod-proxies.md)）
+- **画板 Eagle 链接功能插件** `@folio/feature-canvas-eagle-host` + `@folio/feature-canvas-eagle-ui`：从 Eagle 拖入 `.info` 原图或 `eagle://item/{id}` 深链接时经本地 Eagle Web API 解析原图与来源元数据（条目 ID、名称、所属文件夹、原图路径/URI、缩略图路径、API 地址）并持久化到画板资产，在「图片链接管理」面板展示 Eagle 详情并支持一键在 Eagle 中打开定位。
 - **物料工作区** `@folio/workspace-materials-host` + `@folio/workspace-materials-ui`（形态 A）：关联 A3 横版 `.vectorcraft` 文件；页面多选导出单图/多页 PDF；幻灯片式拖拽排序；物料信息头与 VectorCraft 前台双向同步；默认/项目两套物料数据表。（[ADR-0007](docs/adr/0007-vectorcraft-files-stay-the-single-source-of-truth.md)）
+- **基础后台任务能力** `@folio/base-tasks-host`（`ctx.folioTasks`）：提供有界并发队列、`node:worker_threads` 执行封装、可暂停/恢复/取消的任务状态机，以及 200ms 节流 SSE `topic` 事件推送。
+- **基础桌面原生能力** `@folio/base-native-host`（`ctx.folioNative`）：提供共享 Windows Shell/WIC 缩略图与图像下采样 Worker 池、原生文件/目录选择框、资源管理器定位、默认程序打开与隐藏属性设置。
+- **项目库工作区** `@folio/workspace-projects-host` + `@folio/workspace-projects-ui`（形态 A）：Worker 线程非阻塞目录遍历、`.folio-meta/` 就地元数据与按需双尺寸（120/360px）磁盘缩略图缓存、轻量 `size+mtimeMs` 变更检测与增量同步、全局轻量索引首屏秒开、虚拟滚动项目列表与可折叠文件夹分组虚拟卡片网格，并已接入 DSH `ctx.llm` / `ctx.agentDefaultModel` 轻量采样提取、独立 `projects-ai` 后台批量队列、多选批量标签/同步与项目/文件双右键菜单。
 - **DSH 交互桥接** `@folio/bridge-dsh-interactions-ui`（`ctx.folioInteractions`）：把 DSH 原生右键菜单、文件拖拽、下载/另存为桥接给各工作区，缺原生服务时自动降级。（[ADR-0008](docs/adr/0008-native-desktop-interactions-go-through-a-bridge-service.md)）
 - **内部扩展登记**：`tldraw` 作为 `@folio/workspace-canvas-ui` 的内嵌引擎进入插件清单，在设置页与工作台插件分开展示。
 - **Studio Admin 移植** `@folio/test-studio-admin-ui`：四套主题预设、三种侧栏形态与折叠模式、内容宽度与导航栏行为偏好、`⌘J` 命令搜索、指标卡与面积/折线图；上游 25+ 页面保留导航入口并渲染「排队移植」占位。

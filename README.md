@@ -58,6 +58,7 @@
 | **文件浏览器** | 形态 A（四区） | 快捷文件夹、驱动器容量、懒加载文件树、双栏浏览与可编辑面包屑、Windows 系统缩略图、音视频与文本预览、文件检查器（[DETAIL](plugins/workspace-files-ui/docs/DETAIL.md)） |
 | **画板** | 形态 A（四区） | tldraw 无限画布；图片只存本地文件链接，分层 LOD 代理渲染（256/512/1024/2048），浏览器拖入图片自动导入托管目录，断链检测与批量重定位（[DETAIL](plugins/workspace-canvas-ui/docs/DETAIL.md)） |
 | **物料** | 形态 A（四区） | 关联 A3 横版 `.vectorcraft` 文件；页面多选导出单图/多页 PDF；幻灯片式拖拽排序；物料信息头与 VectorCraft 前台双向同步；默认/项目两套物料数据表（[DETAIL](plugins/workspace-materials-ui/docs/DETAIL.md)） |
+| **项目库** | 形态 A（四区） | 多归档根目录管理、Worker 线程非阻塞扫描、`.folio-meta` 就地元数据与按需双尺寸缩略图缓存、`size+mtimeMs` 增量变更检测、DSH `ctx.llm` 目录采样与 AI 标签/摘要提取、多选批量管理、虚拟滚动列表与可折叠分组虚拟卡片网格（[DETAIL](plugins/workspace-projects-ui/docs/DETAIL.md)） |
 
 ### 内部扩展
 
@@ -93,6 +94,8 @@ F:\AI\geren\LocalFolio\
 │   │  ── 基础能力 ──
 │   ├── base-storage-host/          @folio/base-storage-host   基础存储：ctx.folioStorage（按插件隔离目录 + JSON Store）
 │   ├── base-runtime-host/          @folio/base-runtime-host   基础运行时：ctx.folioRuntime（/lf/* RPC + SSE、动作表、清单）
+│   ├── base-tasks-host/            @folio/base-tasks-host     基础后台任务：ctx.folioTasks（有界并发队列、Worker 线程、SSE 进度）
+│   ├── base-native-host/           @folio/base-native-host    基础桌面能力：ctx.folioNative（共享 Shell/WIC 缩略图池、原生弹窗/打开）
 │   ├── base-ui-kit/                @folio/base-ui-kit         基础 UI 组件库：ctx.folioUi、Radix/lucide、.lf-* 样式、Portal/Toast
 │   ├── base-shell-ui/              @folio/base-shell-ui       基础外壳：ctx.folioShell（两层工作台 + 工作区栏 + 悬浮面板）
 │   ├── base-frame-ui/              @folio/base-frame-ui       基础布局框架：ctx.folioFrame（四区布局，自身不画界面）
@@ -107,6 +110,8 @@ F:\AI\geren\LocalFolio\
 │   ├── workspace-canvas-ui/        @folio/workspace-canvas-ui         画板工作区（内置 tldraw）
 │   ├── workspace-materials-host/   @folio/workspace-materials-host    物料后端（VectorCraft 桥接、导出、文件监听）
 │   ├── workspace-materials-ui/     @folio/workspace-materials-ui      物料工作区
+│   ├── workspace-projects-host/    @folio/workspace-projects-host     项目库后端（Worker 扫描、.folio-meta、按需缩略图、变更检测）
+│   ├── workspace-projects-ui/      @folio/workspace-projects-ui       项目库工作区（虚拟化列表与分组卡片网格）
 │   │  ── 测试界面（只进 test-suite）──
 │   ├── test-overview-host/         @folio/test-overview-host  测试概览后端                      ┐
 │   ├── test-overview-ui/           @folio/test-overview-ui    测试概览 UI（形态 A + 悬浮面板）  │

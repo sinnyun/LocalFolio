@@ -146,6 +146,8 @@ export function CanvasStage(): React.ReactElement {
     getLinkStatus,
     setSelectedBrokenAssetId,
     insertLinkedImages,
+    canHandleExternalText,
+    insertFromExternalText,
     pickAndInsertImages,
     linkElectronDroppedFile,
     importWebFile,
@@ -168,6 +170,10 @@ export function CanvasStage(): React.ReactElement {
   pickAndInsertRef.current = pickAndInsertImages
   const insertLinkedRef = React.useRef(insertLinkedImages)
   insertLinkedRef.current = insertLinkedImages
+  const canHandleExternalTextRef = React.useRef(canHandleExternalText)
+  canHandleExternalTextRef.current = canHandleExternalText
+  const insertFromExternalTextRef = React.useRef(insertFromExternalText)
+  insertFromExternalTextRef.current = insertFromExternalText
   const getLinkStatusRef = React.useRef(getLinkStatus)
   getLinkStatusRef.current = getLinkStatus
   const linkElectronRef = React.useRef(linkElectronDroppedFile)
@@ -295,15 +301,36 @@ export function CanvasStage(): React.ReactElement {
       })
 
       editor.registerExternalContentHandler('text', async content => {
+        const dropPoint = content.point
+          ? editor.screenToPage({ x: content.point.x, y: content.point.y })
+          : undefined
+        if (canHandleExternalTextRef.current(content.text)) {
+          await insertFromExternalTextRef.current(content.text, dropPoint)
+          return
+        }
         const localPaths = extractLocalPathsFromText(content.text)
         if (localPaths.length > 0) {
-          const dropPoint = content.point
-            ? editor.screenToPage({ x: content.point.x, y: content.point.y })
-            : undefined
           await insertLinkedRef.current(localPaths, dropPoint)
           return
         }
         await defaultHandleExternalTextContent(editor, content)
+      })
+
+      const prevUrlHandler = (
+        editor as unknown as {
+          externalContentHandlers?: { url?: (content: unknown) => Promise<void> | void }
+        }
+      ).externalContentHandlers?.url
+
+      editor.registerExternalContentHandler('url', async content => {
+        if (canHandleExternalTextRef.current(content.url)) {
+          const dropPoint = content.point
+            ? editor.screenToPage({ x: content.point.x, y: content.point.y })
+            : undefined
+          await insertFromExternalTextRef.current(content.url, dropPoint)
+          return
+        }
+        await prevUrlHandler?.(content)
       })
 
       const unlistenDoc = editor.store.listen(
@@ -364,25 +391,52 @@ export function CanvasStage(): React.ReactElement {
   )
 
   const handleContainerDragOverCapture = (ev: React.DragEvent<HTMLDivElement>) => {
-    if (ev.dataTransfer?.types?.includes(FOLIO_DRAG_MIME)) {
+    const dt = ev.dataTransfer
+    if (!dt) return
+    if (dt.types?.includes(FOLIO_DRAG_MIME)) {
       ev.preventDefault()
-      ev.dataTransfer.dropEffect = 'link'
+      dt.dropEffect = 'link'
+      return
+    }
+    const textPayload = dt.getData('text/uri-list') || dt.getData('text/plain')
+    if (textPayload && canHandleExternalText(textPayload)) {
+      ev.preventDefault()
+      dt.dropEffect = 'link'
     }
   }
 
   const handleContainerDropCapture = (ev: React.DragEvent<HTMLDivElement>) => {
-    const raw = ev.dataTransfer?.getData(FOLIO_DRAG_MIME)
-    if (!raw) return
-    const payload = decodeFolioDragPayload(raw)
-    if (!payload) return
-    const imagePaths = payload.paths.filter(isImagePathCandidate)
-    if (imagePaths.length === 0) return
+    const dt = ev.dataTransfer
+    if (!dt) return
 
-    ev.preventDefault()
-    ev.stopPropagation()
-    const editor = editorRef.current
-    const dropPoint = editor ? editor.screenToPage({ x: ev.clientX, y: ev.clientY }) : undefined
-    void insertLinkedImages(imagePaths, dropPoint)
+    const raw = dt.getData(FOLIO_DRAG_MIME)
+    if (raw) {
+      const payload = decodeFolioDragPayload(raw)
+      if (payload) {
+        const imagePaths = payload.paths.filter(isImagePathCandidate)
+        if (imagePaths.length > 0) {
+          ev.preventDefault()
+          ev.stopPropagation()
+          const editor = editorRef.current
+          const dropPoint = editor ? editor.screenToPage({ x: ev.clientX, y: ev.clientY }) : undefined
+          void insertLinkedImages(imagePaths, dropPoint)
+          return
+        }
+      }
+    }
+
+    const droppedFiles = Array.from(dt.files ?? [])
+    const hasDiskFile = droppedFiles.some(f => Boolean(resolveDroppedFilePath(f)))
+    if (!hasDiskFile) {
+      const textPayload = dt.getData('text/uri-list') || dt.getData('text/plain')
+      if (textPayload && canHandleExternalText(textPayload)) {
+        ev.preventDefault()
+        ev.stopPropagation()
+        const editor = editorRef.current
+        const dropPoint = editor ? editor.screenToPage({ x: ev.clientX, y: ev.clientY }) : undefined
+        void insertFromExternalText(textPayload, dropPoint)
+      }
+    }
   }
 
   const handleContainerKeyDown = (ev: React.KeyboardEvent<HTMLDivElement>) => {

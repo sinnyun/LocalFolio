@@ -8,6 +8,7 @@ import {
   type FolioRouteHandler,
   type FolioRouteMethod,
   type InvalidateEvent,
+  type RuntimeTopicEvent,
 } from '@folio/base-contract'
 
 const MAX_RPC_BODY_BYTES = 2 * 1024 * 1024 // 2 MB
@@ -54,6 +55,10 @@ export function createEventBus(): ManagedEventBus {
       const payload: InvalidateEvent =
         target === undefined ? { scope, ts: Date.now() } : { scope, target, ts: Date.now() }
       broadcast('invalidate', payload)
+    },
+    emitEvent(topic: string, payload: unknown): void {
+      const event: RuntimeTopicEvent = { topic, payload, ts: Date.now() }
+      broadcast('topic', event)
     },
     dispose(): void {
       subscribers.clear()
@@ -370,7 +375,7 @@ export function createRpcApp(options: CreateRpcOptions): FolioRpc {
     }
 
     const abortController = new AbortController()
-    req.on('close', () => {
+    res.on('close', () => {
       if (!res.writableEnded) abortController.abort()
     })
 

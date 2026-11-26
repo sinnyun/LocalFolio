@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Base tasks host">
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#181c24"/>
+  <g fill="none" stroke="#60a5fa" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 22h16"/>
+    <path d="M18 32h24"/>
+    <path d="M18 42h12"/>
+    <polyline points="38 19 42 23 48 16"/>
+  </g>
+  <circle cx="45" cy="44" r="5" fill="#34d399"/>
+</svg>

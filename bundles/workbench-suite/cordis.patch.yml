@@ -8,6 +8,12 @@
       name: '@folio/base-storage-host'
     - id: base-runtime-host
       name: '@folio/base-runtime-host'
+    - id: base-tasks-host
+      name: '@folio/base-tasks-host'
+    - id: base-native-host
+      name: '@folio/base-native-host'
+    - id: base-thumbs-host
+      name: '@folio/base-thumbs-host'
     - id: base-ui-kit
       name: '@folio/base-ui-kit'
     - id: base-shell-ui
@@ -28,7 +34,19 @@
       name: '@folio/workspace-canvas-host'
     - id: workspace-canvas-ui
       name: '@folio/workspace-canvas-ui'
+    - id: feature-canvas-eagle-host
+      name: '@folio/feature-canvas-eagle-host'
+    - id: feature-canvas-eagle-ui
+      name: '@folio/feature-canvas-eagle-ui'
     - id: workspace-materials-host
       name: '@folio/workspace-materials-host'
     - id: workspace-materials-ui
       name: '@folio/workspace-materials-ui'
+    - id: workspace-projects-host
+      name: '@folio/workspace-projects-host'
+    - id: workspace-projects-ui
+      name: '@folio/workspace-projects-ui'
+    - id: feature-archive-host
+      name: '@folio/feature-archive-host'
+    - id: feature-archive-ui
+      name: '@folio/feature-archive-ui'

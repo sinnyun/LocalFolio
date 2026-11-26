@@ -1,7 +1,8 @@
 import * as React from 'react'
-import type { WorkspaceUiContribution } from '@folio/base-contract'
-import { FolioIconBack, FolioIconLayers, FolioIconPanelLeft } from '@folio/base-ui-kit/client'
-import { getPaneLayoutFor, useShellStore } from './shell-store.js'
+import type { CaptionActionContribution, WorkspaceUiContribution } from '@folio/base-contract'
+import { FolioIconBack, FolioIconLayers } from '@folio/base-ui-kit/client'
+import { useShellStore } from './shell-store.js'
+import { ROW_ACTION_STYLES } from './row-actions.js'
 import { useWindowsCaptionMetrics } from './caption.js'
 
 /** The shell's own state the caption row needs; the controller in `client.tsx` provides it. */
@@ -12,6 +13,8 @@ export interface CaptionBarBridge {
   readonly open: () => void
   readonly listWorkspaces: () => readonly WorkspaceUiContribution[]
   readonly subscribeWorkspaces: (listener: () => void) => () => void
+  readonly listCaptionActions: () => readonly CaptionActionContribution[]
+  readonly subscribeCaptionActions: (listener: () => void) => () => void
 }
 
 const CAPTION_STYLES = `
@@ -88,8 +91,9 @@ function CaptionDivider(): React.ReactElement {
 }
 
 /**
- * Windows Desktop caption row: the single plugin-panel toggle, the workspace
- * switcher, and the panel toggles that the in-overlay top bar used to carry.
+ * Windows Desktop caption row: the workbench toggle and the workspace switcher,
+ * followed by whatever plugins registered through `registerCaptionAction` (the
+ * layout frame contributes the active app's side-panel toggles there).
  * It renders inside the shell's own `shell.overlay` entry and only pins itself
  * to the caption with `position: fixed` — the same way ui-sidebar moves its
  * rail controls there — so no plugin-owned DOM leaves the application root.
@@ -106,9 +110,11 @@ export function CaptionBar({ bridge }: { readonly bridge: CaptionBarBridge }): R
   )
   const activeWorkspaceId = useShellStore(state => state.activeWorkspaceId)
   const setActiveWorkspace = useShellStore(state => state.setActiveWorkspace)
-  const paneLayouts = useShellStore(state => state.paneLayouts)
-  const toggleLeftPanel = useShellStore(state => state.toggleLeftPanel)
-  const toggleRightPanel = useShellStore(state => state.toggleRightPanel)
+  const captionActions = React.useSyncExternalStore(
+    bridge.subscribeCaptionActions,
+    bridge.listCaptionActions,
+    bridge.listCaptionActions,
+  )
 
   const sorted = React.useMemo(
     () => [...workspaces].sort((a, b) => a.order - b.order),
@@ -116,7 +122,6 @@ export function CaptionBar({ bridge }: { readonly bridge: CaptionBarBridge }): R
   )
   const activeWorkspace = sorted.find(workspace => workspace.id === activeWorkspaceId) ?? sorted[0]
   const activeId = activeWorkspace?.id ?? ''
-  const layout = getPaneLayoutFor(paneLayouts, activeId)
 
   if (metrics === null || typeof document === 'undefined') return null
 
@@ -199,29 +204,14 @@ export function CaptionBar({ bridge }: { readonly bridge: CaptionBarBridge }): R
         })}
       </nav>
 
-      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 2 }}>
-        {isOpen && activeWorkspace?.LeftPanel !== undefined ? (
-          <CaptionButton
-            iconOnly
-            data-lf-caption-panel-left=""
-            aria-pressed={!layout.leftCollapsed}
-            title={layout.leftCollapsed ? '展开左侧栏' : '折叠左侧栏'}
-            onClick={() => toggleLeftPanel(activeId)}
-          >
-            <FolioIconPanelLeft size={14} />
-          </CaptionButton>
-        ) : null}
-        {isOpen && activeWorkspace?.RightPanel !== undefined ? (
-          <CaptionButton
-            iconOnly
-            data-lf-caption-panel-right=""
-            aria-pressed={!layout.rightCollapsed}
-            title={layout.rightCollapsed ? '展开右侧栏' : '折叠右侧栏'}
-            onClick={() => toggleRightPanel(activeId)}
-          >
-            <FolioIconPanelLeft size={14} />
-          </CaptionButton>
-        ) : null}
+      <div
+        data-lf-row-actions=""
+        style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 2 }}
+      >
+        <style data-lf-row-action-styles="">{ROW_ACTION_STYLES}</style>
+        {isOpen
+          ? captionActions.map(action => <action.Component key={action.id} isOpen={isOpen} />)
+          : null}
       </div>
     </div>
   )

@@ -1305,7 +1305,7 @@ export function apply(ctx: Context): void {
 }
 ```
 
-约定：全屏工作台挂 `shell.overlay`（`order: 1`），自由悬浮面板层同 slot（`order: 2`），UI 样式/Portal/Toast 宿主由 `@folio/base-ui-kit` 挂同 slot（`order: 3`）；工作区向 `ctx.folioShell.registerWorkspace` 注册，`MainView` 渲染 `ctx.folioFrame.View` 并调用 `attachHostWorkspace`、设 `hideStatusBar: true`；工作区内部的功能插件只调 `ctx.folioFrame.registerApp` 声明四区内容（左/中/右/底、调宽折叠、持久化与错误隔离均由框架托管）；样式只用 `--dsw-alias-*` / `--dsw-font-family`，外壳还要尊重 `--dsh-frame-top-clearance`；控件与图标通过 `dsh.client.external: ['@folio/base-ui-kit']` 从 `@folio/base-ui-kit/client` 单实例引入；快捷键走 `ctx.shortcuts`；Client manifest 必须有 `dsh.client.platform: "web"`，`immediately` 只在确实要启动早期渲染时开，`inject` 只用于排序激活。
+约定：全屏工作台挂 `shell.overlay`（`order: 1`），自由悬浮面板层同 slot（`order: 2`），UI 样式/Portal/Toast 宿主由 `@folio/base-ui-kit` 挂同 slot（`order: 3`）；工作区向 `ctx.folioShell.registerWorkspace` 注册，四区工作区的 `MainView` 直接写 `ctx.folioFrame.WorkspaceHost`（认领宿主由它自己完成，外壳不画区域布局也不画底栏）；工作区内部的功能插件只调 `ctx.folioFrame.registerApp` 声明四区内容（左/中/右/底、调宽折叠、持久化与错误隔离均由框架托管）；不需要四区的工作区直接渲染自己的全屏内容；样式只用 `--dsw-alias-*` / `--dsw-font-family`，外壳还要尊重 `--dsh-frame-top-clearance`；控件与图标通过 `dsh.client.external: ['@folio/base-ui-kit']` 从 `@folio/base-ui-kit/client` 单实例引入；快捷键走 `ctx.shortcuts`；Client manifest 必须有 `dsh.client.platform: "web"`，`immediately` 只在确实要启动早期渲染时开，`inject` 只用于排序激活。
 
 ### 11.4 打包与构建
 
@@ -1334,7 +1334,7 @@ export function apply(ctx: Context): void {
 
 1. 在 §7 找同类、在 §4 找 seam —— 能复用就只写薄封装。
 2. `plugins/feature-xxx-host`：`inject: ['folioRuntime','folioStorage']`，用 `ctx.folioStorage.forPlugin('feature-xxx-host')` 取目录，`ctx.folioRuntime.registerAction` 注册动作，全部包在 `ctx.effect`。
-3. `plugins/workspace-xxx-ui`：`dsh.client.inject: ['@folio/base-ui-kit', '@folio/base-shell-ui', '@folio/base-frame-ui']`、`dsh.client.external: ['@folio/base-ui-kit']`、`inject: ['folioFrame', 'folioShell']`；向 `ctx.folioShell.registerWorkspace` 注册工作区，`MainView` 渲染 `ctx.folioFrame.View` 并调用 `attachHostWorkspace(workspaceId)`，同时设 `hideStatusBar: true`。工作区内部的功能插件只 `inject: ['folioFrame']`，用 `registerApp({ id, title, Left, Main, Right, Status })` 声明四个区域。
+3. `plugins/workspace-xxx-ui`：`dsh.client.inject: ['@folio/base-ui-kit', '@folio/base-shell-ui', '@folio/base-frame-ui']`、`dsh.client.external: ['@folio/base-ui-kit']`、`inject: ['folioFrame', 'folioShell']`；向 `ctx.folioShell.registerWorkspace` 注册工作区，`MainView` 直接写 `ctx.folioFrame.WorkspaceHost`（认领宿主由它自己完成，不需要再设 `hideStatusBar`）。工作区内部的功能插件只 `inject: ['folioFrame']`，用 `registerApp({ id, title, Left, Main, Right, Status })` 声明四个区域。页面自带骨架的工作区可以完全不用框架，直接渲染自己的全屏主视图。
 4. 需要模型能力再加 `bridge-*`：`ctx.tools.register()`，工具名避开 §9。
 5. 各包的 `package.json` + 图标 + `locale/zh.json`（+ 可选 `meta.detail`），补 `engines.dsh`。
 6. 在 `bundles/workbench-suite/package.json` 与 `cordis.patch.yml` 各加一行。

@@ -150,7 +150,7 @@ export function createDefaultPluginManifest(): PluginManifest {
         category: 'base',
         slots: ['shell.overlay', 'conversation.header.leading'],
         services: ['folioShell'],
-        description: '提供工作台外壳：可退回的全屏工作台、工作区栏、悬浮面板与底部信息栏。',
+        description: '提供工作台外壳：可退回的全屏工作台（顶部条 + 工作区内容区）、工作区栏、悬浮面板，以及标题栏动作注册点。',
         enabled: true,
         dependsOn: ['@folio/base-ui-kit', '@deepseek-ai/dsh-client-ui-layout'],
       },

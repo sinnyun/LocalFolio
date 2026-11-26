@@ -1,4 +1,5 @@
 import type * as React from 'react'
+import type { WorkspaceViewProps } from './shell.js'
 
 /**
  * Declarative layout contract for `@folio/base-frame-ui`.
@@ -121,6 +122,12 @@ export interface FrameAppDefinition {
 export interface FolioFrameService {
   /** The frame's own view. Render it to turn the host workspace into the frame. */
   readonly View: React.ComponentType
+  /**
+   * Ready-made `MainView` for a workspace: renders {@link View} and attaches
+   * itself as the host while it is mounted, so `openApp()` can navigate and the
+   * workspace author never wires `attachHostWorkspace` by hand.
+   */
+  readonly WorkspaceHost: React.ComponentType<WorkspaceViewProps>
   registerApp(definition: FrameAppDefinition): () => void
   listApps(): readonly FrameAppDefinition[]
   listAppSummaries(): readonly FrameAppSummary[]

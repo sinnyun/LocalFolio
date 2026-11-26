@@ -39,7 +39,6 @@
   "devDependencies": {
     "@folio/base-ui-kit": "workspace:*",
     "@folio/base-contract": "workspace:*",
-    "react-resizable-panels": "^4.24.1",
     "zustand": "^5.0.4"
   },
   "engines": {

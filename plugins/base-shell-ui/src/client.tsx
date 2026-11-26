@@ -1,6 +1,7 @@
 import * as React from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type {
+  CaptionActionContribution,
   FloatingPanelContribution,
   FloatingPanelDefaults,
   FolioShellService,
@@ -59,6 +60,7 @@ interface ShellController extends FolioShellService {
   subscribeOpen(listener: () => void): () => void
   subscribeWorkspaces(listener: () => void): () => void
   subscribeFloatingPanels(listener: () => void): () => void
+  subscribeCaptionActions(listener: () => void): () => void
 }
 
 export function createShellController(initialOpen = false): ShellController {
@@ -72,6 +74,10 @@ export function createShellController(initialOpen = false): ShellController {
   const floatingMap = new Map<string, FloatingPanelContribution>()
   let floatingSnapshot: readonly FloatingPanelContribution[] = []
   const floatingListeners = new Set<() => void>()
+
+  const captionMap = new Map<string, CaptionActionContribution>()
+  let captionSnapshot: readonly CaptionActionContribution[] = []
+  const captionListeners = new Set<() => void>()
 
   const notify = (set: Set<() => void>): void => {
     for (const listener of [...set]) listener()
@@ -91,6 +97,13 @@ export function createShellController(initialOpen = false): ShellController {
   const recomputeFloating = (): void => {
     floatingSnapshot = Array.from(floatingMap.values())
     notify(floatingListeners)
+  }
+
+  const recomputeCaptions = (): void => {
+    captionSnapshot = Array.from(captionMap.values()).sort(
+      (a, b) => (a.order ?? 100) - (b.order ?? 100),
+    )
+    notify(captionListeners)
   }
 
   const navigateTo = (workspaceId: string, target?: unknown): void => {
@@ -160,6 +173,20 @@ export function createShellController(initialOpen = false): ShellController {
     subscribeWorkspaces(listener) {
       workspaceListeners.add(listener)
       return () => workspaceListeners.delete(listener)
+    },
+    registerCaptionAction(action) {
+      captionMap.set(action.id, action)
+      recomputeCaptions()
+      return () => {
+        if (captionMap.get(action.id) !== action) return
+        captionMap.delete(action.id)
+        recomputeCaptions()
+      }
+    },
+    listCaptionActions: () => captionSnapshot,
+    subscribeCaptionActions(listener) {
+      captionListeners.add(listener)
+      return () => captionListeners.delete(listener)
     },
     registerFloatingPanel(contribution) {
       floatingMap.set(contribution.id, contribution)
@@ -247,6 +274,8 @@ export function createShellOverlayPlugin(options: CreateShellOverlayPluginOption
         open: controller.open,
         listWorkspaces: controller.listWorkspaces,
         subscribeWorkspaces: controller.subscribeWorkspaces,
+        listCaptionActions: controller.listCaptionActions,
+        subscribeCaptionActions: controller.subscribeCaptionActions,
       }
 
       const resolveShortcuts = (): DshShortcutService | undefined => {
@@ -307,6 +336,11 @@ export function createShellOverlayPlugin(options: CreateShellOverlayPluginOption
         )
         const activeWorkspaceId = useShellStore(s => s.activeWorkspaceId)
         const setActiveWorkspace = useShellStore(s => s.setActiveWorkspace)
+        const captionActions = React.useSyncExternalStore(
+          controller.subscribeCaptionActions,
+          controller.listCaptionActions,
+          controller.listCaptionActions,
+        )
         const overlayRef = React.useRef<HTMLDivElement | null>(null)
 
         React.useEffect(() => {
@@ -353,6 +387,7 @@ export function createShellOverlayPlugin(options: CreateShellOverlayPluginOption
               onOpenFloatingPanel={(id, defaults) => controller.openFloatingPanel(id, defaults)}
               onCloseFloatingPanel={id => controller.closeFloatingPanel(id)}
               onExit={() => controller.close()}
+              captionActions={captionActions}
               enableEvents={options.enableEvents}
             />
           </div>

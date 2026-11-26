@@ -1,8 +1,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { FrameWorkbench } from './frame/FrameWorkbench.js'
+import { FrameCaptionActions } from './frame/FrameCaptionActions.js'
 import { createFolioFrameService } from './frame/service.js'
 
 export { FrameWorkbench } from './frame/FrameWorkbench.js'
+export { FrameCaptionActions } from './frame/FrameCaptionActions.js'
 export { FrameAppSwitcher } from './frame/FrameAppSwitcher.js'
 export { FrameStatusBar } from './frame/FrameStatusBar.js'
 export {
@@ -31,8 +33,19 @@ export function apply(ctx: Context): void {
       View: FrameWorkbench,
       openWorkspace: workspaceId => ctx.folioShell.navigateTo(workspaceId),
     })
-    return ctx.provide('folioFrame', service)
-  }, 'base-frame-ui: folioFrame service')
+    const disposeProvide = ctx.provide('folioFrame', service)
+    // The shell owns the row; the frame contributes the active app's side-panel
+    // toggles so the signalling chain stays frame → shell.
+    const disposeCaption = ctx.folioShell.registerCaptionAction({
+      id: 'folio.frame.panel-toggles',
+      order: 10,
+      Component: FrameCaptionActions,
+    })
+    return () => {
+      disposeCaption()
+      disposeProvide()
+    }
+  }, 'base-frame-ui: folioFrame service + caption actions')
 }
 
 export default { name, inject, apply }

@@ -7,3 +7,5 @@
 ## Consequences
 
 工作区必须自己设置 `hideStatusBar: true`，否则外壳会再画一条底部信息栏，出现双底栏。`openApp()` 只有在宿主认领后才做导航；没有宿主时它只激活应用。
+
+> 后续：[ADR-0003](0003-shell-owns-window-and-workspace-frame-owns-app-regions.md) 钉死了外壳与布局框架的职责边界，`hideStatusBar` 这一步已由 `folioFrame.WorkspaceHost` 内部承担。本条「框架不注册工作区」的结论不变。

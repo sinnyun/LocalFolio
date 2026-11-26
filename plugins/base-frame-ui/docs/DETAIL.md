@@ -1,6 +1,6 @@
 # @folio/base-frame-ui · 基础布局框架
 
-工作台通用基础能力。它把「左侧面板 / 中间内容 / 右侧面板 / 底部信息栏」四区布局、分隔条调宽、面板折叠、宽度持久化、快捷键、Suspense 与错误隔离全部收进框架内部。**框架自身不画任何界面、也不注册工作区**：谁渲染 `folioFrame.View`，谁就是它的宿主。
+工作台通用基础能力。它把「左侧面板 / 中间内容 / 右侧面板 / 底部信息栏」四区布局、分隔条调宽、面板折叠、宽度持久化、快捷键、Suspense 与错误隔离全部收进框架内部。**框架自身不画任何界面、也不注册工作区**：把 `WorkspaceHost` 当作自己 `MainView` 的工作区，就是它的宿主。
 
 ```
 ┌──────────────────────────── 工作区 ────────────────────────────┐
@@ -12,48 +12,37 @@
 └───────────────────────────────────────────────────────────────┘
 ```
 
-## 1. 宿主接入（工作区侧）
+## 1. 接入（工作区侧）
 
-每个工作区自己决定何时把框架挂上来：
+工作区把框架的 `WorkspaceHost` 直接当作自己的 `MainView`。它在挂载时自己认领宿主，所以工作区插件不需要再手动调 `attachHostWorkspace`：
 
 ```tsx
-import * as React from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { WorkspaceUiContribution } from '@folio/base-contract'
-
-export function createNotesWorkspace(getView: () => React.ComponentType): WorkspaceUiContribution {
-  function NotesMain(): React.ReactElement {
-    const View = getView()
-    return <View />
-  }
-
-  return {
-    id: 'notes',
-    title: '笔记工作区',
-    order: 20,
-    MainView: NotesMain,
-    hideStatusBar: true, // 底部信息栏由框架渲染
-  }
-}
 
 export const inject = ['folioFrame', 'folioShell'] as const
 
 export function apply(ctx: Context): void {
+  const frame = ctx.folioFrame
+  const workspace: WorkspaceUiContribution = {
+    id: 'notes',
+    title: '笔记工作区',
+    order: 20,
+    MainView: frame.WorkspaceHost,
+  }
+
   ctx.effect(() => {
-    const frame = ctx.folioFrame
-    const dispose = ctx.folioShell.registerWorkspace(createNotesWorkspace(() => frame.View))
-    const detach = frame.attachHostWorkspace('notes')
-    return () => {
-      detach()
-      dispose()
-    }
+    const dispose = ctx.folioShell.registerWorkspace(workspace)
+    return () => dispose()
   }, 'notes: register workspace')
 }
 ```
 
-`attachHostWorkspace` 只做一件事：让 `folioFrame.openApp()` 知道该切回哪个工作区。没有宿主时 `openApp` 仅激活应用，不做导航。
+`attachHostWorkspace` 仍在服务上，只做一件事：让 `folioFrame.openApp()` 知道该切回哪个工作区；`WorkspaceHost` 会在挂载时替你调用它。没有宿主时 `openApp` 仅激活应用，不做导航。
 
 现成的宿主见 `@folio/bridge-frame-test-ui`（测试框架工作区）。
+
+不需要四区的工作区不必接入框架：直接渲染自己的全屏内容即可。外壳不画底栏，也没有第二个底部信息栏需要躲。
 
 ## 2. 注册应用（工作区内部视图）
 
@@ -147,7 +136,7 @@ const notesApp = {
 | `listApps()` | 当前已注册应用摘要 |
 | `activateApp(id)` | 切换到另一个应用 |
 
-非组件代码（其他 Host 服务、命令）使用 `ctx.folioFrame`：`View` / `registerApp` / `listApps` / `activateApp` / `openApp` / `getLayout` / `setLayout` / `subscribe` / `attachHostWorkspace`。
+非组件代码（其他 Host 服务、命令）使用 `ctx.folioFrame`：`View` / `WorkspaceHost` / `registerApp` / `listApps` / `activateApp` / `openApp` / `getLayout` / `setLayout` / `subscribe` / `attachHostWorkspace`。
 
 ## 6. 布局与交互规则
 
@@ -157,7 +146,7 @@ const notesApp = {
 - 分隔条支持鼠标/触控拖拽、方向键微调（`Shift` 加速）、`Home`/`End` 到极限、双击或 `Enter` 恢复默认。
 - 每个应用独立持久化：`activeAppId` 与各应用的宽度/折叠状态写入 `localStorage['folio.frame.v1']`。
 - 每个区域独立 `Suspense` + 错误边界：右侧面板抛错不会空白左侧、中间或底部。
-- 宿主工作区通过 `hideStatusBar: true` 关闭外壳的全局底栏，由框架自己渲染唯一一条底部信息栏，避免双底栏。
+- 底部信息栏只由框架渲染（`FrameStatusBar`）：外壳已经不画底栏，四区工作区拥有自己整条底边。
 
 ## 7. 边框与主题
 

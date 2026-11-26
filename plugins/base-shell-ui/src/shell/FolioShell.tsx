@@ -1,19 +1,15 @@
 import * as React from 'react'
 import type {
+  CaptionActionContribution,
   FloatingPanelDefaults,
   WorkspaceUiContribution,
   WorkspaceViewProps,
 } from '@folio/base-contract'
 import { FolioQueryProvider } from '@folio/base-contract/rpc'
-import {
-  FolioButton,
-  FolioIconBack,
-  FolioIconLayers,
-  FolioIconPanelLeft,
-} from '@folio/base-ui-kit/client'
+import { FolioButton, FolioIconBack, FolioIconLayers } from '@folio/base-ui-kit/client'
 import { WorkspaceErrorBoundary } from './ErrorBoundary.js'
-import { ShellLayout } from './ShellLayout.js'
-import { getPaneLayoutFor, useShellStore } from './shell-store.js'
+import { ROW_ACTION_STYLES } from './row-actions.js'
+import { useShellStore } from './shell-store.js'
 import { useWindowsCaptionMode } from './caption.js'
 
 export interface FolioShellProps {
@@ -23,6 +19,7 @@ export interface FolioShellProps {
   readonly onOpenFloatingPanel: (id: string, defaults?: FloatingPanelDefaults) => void
   readonly onCloseFloatingPanel: (id: string) => void
   readonly onExit: () => void
+  readonly captionActions?: readonly CaptionActionContribution[]
   readonly enableEvents?: boolean
 }
 
@@ -36,6 +33,29 @@ function matchWorkspaceForFile(
   )
 }
 
+function WorkspaceLoading(): React.ReactElement {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+        fontSize: 12,
+        color: 'var(--dsw-alias-label-tertiary, #81858c)',
+      }}
+    >
+      正在加载工作区...
+    </div>
+  )
+}
+
+/**
+ * The shell is two layers: one caption row, and one content area that belongs
+ * entirely to the active workspace. It draws no panes and no bottom edge — form-A
+ * workspaces put the four-region frame here, form-B workspaces put their own
+ * full-bleed view here.
+ */
 function FolioShellInner({
   workspaces,
   activeWorkspaceId,
@@ -43,6 +63,7 @@ function FolioShellInner({
   onOpenFloatingPanel,
   onCloseFloatingPanel,
   onExit,
+  captionActions,
 }: Omit<FolioShellProps, 'enableEvents'>): React.ReactElement {
   const sorted = React.useMemo(
     () => [...workspaces].sort((a, b) => a.order - b.order),
@@ -51,18 +72,12 @@ function FolioShellInner({
   const activeWorkspace = sorted.find(w => w.id === activeWorkspaceId) ?? sorted[0]
   const activeId = activeWorkspace?.id ?? ''
 
-  const paneLayouts = useShellStore(s => s.paneLayouts)
   const pendingTarget = useShellStore(s => s.pendingTarget)
   const setPendingTarget = useShellStore(s => s.setPendingTarget)
   const consumePendingTarget = useShellStore(s => s.consumePendingTarget)
-  const setPaneLayout = useShellStore(s => s.setPaneLayout)
-  const toggleLeftPanel = useShellStore(s => s.toggleLeftPanel)
-  const toggleRightPanel = useShellStore(s => s.toggleRightPanel)
 
-  const layout = getPaneLayoutFor(paneLayouts, activeId)
-  // Windows Desktop hosts the switcher, the panel toggles and the exit toggle
-  // in the window caption row (see CaptionBar), so the in-overlay top bar is
-  // dropped there; Web and macOS keep it.
+  // Windows Desktop hosts the entry toggle and the workspace switcher in the
+  // native window caption, so this row is dropped there.
   const captionMode = useWindowsCaptionMode()
 
   const navigateTo = React.useCallback(
@@ -105,7 +120,7 @@ function FolioShellInner({
     ],
   )
 
-  const StatusSlot = activeWorkspace?.StatusSlot
+  const MainView = activeWorkspace?.MainView
 
   return (
     <div
@@ -152,7 +167,7 @@ function FolioShellInner({
               <FolioIconLayers size={15} />
               <span>LocalFolio</span>
             </div>
-  
+
             <FolioButton
               variant="outline"
               size="sm"
@@ -163,7 +178,7 @@ function FolioShellInner({
             >
               返回 DSH
             </FolioButton>
-  
+
             <div
               aria-hidden="true"
               style={{
@@ -173,7 +188,7 @@ function FolioShellInner({
                 background: 'var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.14))',
               }}
             />
-  
+
             <nav
               aria-label="工作区切换"
               style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflowX: 'auto' }}
@@ -205,43 +220,40 @@ function FolioShellInner({
               })}
             </nav>
           </div>
-  
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-            {activeWorkspace?.LeftPanel ? (
-              <FolioButton
-                variant="ghost"
-                size="sm"
-                data-lf-toggle-left=""
-                aria-pressed={!layout.leftCollapsed}
-                title={layout.leftCollapsed ? '展开左侧栏' : '折叠左侧栏'}
-                icon={<FolioIconPanelLeft size={14} />}
-                onClick={() => toggleLeftPanel(activeId)}
-              />
-            ) : null}
-            {activeWorkspace?.RightPanel ? (
-              <FolioButton
-                variant="ghost"
-                size="sm"
-                data-lf-toggle-right=""
-                aria-pressed={!layout.rightCollapsed}
-                title={layout.rightCollapsed ? '展开右侧栏' : '折叠右侧栏'}
-                icon={<FolioIconPanelLeft size={14} />}
-                onClick={() => toggleRightPanel(activeId)}
-              />
-            ) : null}
+
+          <div
+            data-lf-row-actions=""
+            style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}
+          >
+            <style data-lf-row-action-styles="">{ROW_ACTION_STYLES}</style>
+            {(captionActions ?? []).map(action => (
+              <action.Component key={action.id} isOpen />
+            ))}
           </div>
         </header>
       )}
 
-      <ShellLayout
-        workspace={activeWorkspace}
-        viewProps={viewProps}
-        leftCollapsed={layout.leftCollapsed}
-        rightCollapsed={layout.rightCollapsed}
-        leftSize={layout.leftSize}
-        rightSize={layout.rightSize}
-        onPaneSizesChange={patch => setPaneLayout(activeId, patch)}
-        fallbackView={
+      <div
+        data-lf-content=""
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          minHeight: 0,
+          minWidth: 0,
+          overflow: 'hidden',
+        }}
+      >
+        {MainView ? (
+          <WorkspaceErrorBoundary
+            scopeName={activeWorkspace?.title ?? activeId}
+            resetKey={activeId}
+          >
+            <React.Suspense fallback={<WorkspaceLoading />}>
+              <MainView {...viewProps} />
+            </React.Suspense>
+          </WorkspaceErrorBoundary>
+        ) : (
           <div
             style={{
               display: 'flex',
@@ -262,37 +274,8 @@ function FolioShellInner({
               安装任意注入 ctx.folioShell 的工作区插件后，工作区将自动出现。
             </p>
           </div>
-        }
-      />
-
-      {activeWorkspace?.hideStatusBar ? null : (
-        <footer
-          data-lf-statusbar=""
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            height: 28,
-            padding: '0 12px',
-            flexShrink: 0,
-            fontSize: 11,
-            borderTop: '1px solid var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.12))',
-            background: 'var(--dsw-specific-sidebar-fill, #f9fafb)',
-            color: 'var(--dsw-alias-label-tertiary, #81858c)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-            {StatusSlot ? (
-              <WorkspaceErrorBoundary scopeName={`${activeId}:status`} resetKey={activeId}>
-                <StatusSlot {...viewProps} />
-              </WorkspaceErrorBoundary>
-            ) : (
-              <span>已挂载工作区：{sorted.length} 个</span>
-            )}
-          </div>
-          <div style={{ flexShrink: 0 }}>按 Esc 关闭悬浮面板 / 返回 DSH</div>
-        </footer>
-      )}
+        )}
+      </div>
     </div>
   )
 }
@@ -307,6 +290,7 @@ export function FolioShell(props: FolioShellProps): React.ReactElement {
         onOpenFloatingPanel={props.onOpenFloatingPanel}
         onCloseFloatingPanel={props.onCloseFloatingPanel}
         onExit={props.onExit}
+        captionActions={props.captionActions}
       />
     </FolioQueryProvider>
   )

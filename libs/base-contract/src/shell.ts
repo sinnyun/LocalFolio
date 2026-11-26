@@ -50,17 +50,32 @@ export interface WorkspaceUiContribution {
   readonly icon?: React.ComponentType<{ size?: number }>
   readonly shortcutScope?: string
   readonly fileExtensions?: readonly string[]
-  readonly HeaderSlot?: React.ComponentType<WorkspaceViewProps>
-  readonly LeftPanel?: React.ComponentType<WorkspaceViewProps>
-  readonly MainView?: WorkspaceMainViewComponent
-  readonly RightPanel?: React.ComponentType<WorkspaceViewProps>
-  readonly StatusSlot?: React.ComponentType<WorkspaceViewProps>
   /**
-   * Let a workspace own the whole bottom edge. `@folio/base-frame-ui` uses it
-   * so its four-region layout can render one shared Provider around the status
-   * bar; `StatusSlot` is ignored when this is set.
+   * The workspace's whole content area, below the shell's caption bar.
+   *
+   * Form A (four regions) passes `folioFrame.WorkspaceHost` and registers a
+   * `FrameAppDefinition`. Form B passes its own full-bleed view; the shell
+   * contributes nothing inside this area — no panes, no bottom edge.
    */
-  readonly hideStatusBar?: boolean
+  readonly MainView?: WorkspaceMainViewComponent
+}
+
+/** Props handed to a caption-row action registered through `registerCaptionAction`. */
+export interface CaptionActionProps {
+  /** Whether the workbench panel is currently open. */
+  readonly isOpen: boolean
+}
+
+/**
+ * A small control a plugin contributes to the shell's caption row (Windows
+ * Desktop title bar) or the in-overlay top bar. The shell owns the row and its
+ * styling; the plugin owns the button and what it does.
+ */
+export interface CaptionActionContribution {
+  readonly id: string
+  /** Sort weight inside the row. Lower comes first. Defaults to 100. */
+  readonly order?: number
+  readonly Component: React.ComponentType<CaptionActionProps>
 }
 
 export interface FloatingPanelDefaults {
@@ -111,6 +126,12 @@ export interface FolioShellService {
   toggle(): void
   registerWorkspace(contribution: WorkspaceUiContribution): () => void
   listWorkspaces(): readonly WorkspaceUiContribution[]
+  /**
+   * Contribute a control to the shell's caption row / top bar. The shell owns
+   * the row, the styling and the ordering; the plugin owns the button.
+   */
+  registerCaptionAction(action: CaptionActionContribution): () => void
+  listCaptionActions(): readonly CaptionActionContribution[]
   registerFloatingPanel(contribution: FloatingPanelContribution): () => void
   listFloatingPanels(): readonly FloatingPanelContribution[]
   openFloatingPanel(id: string, defaults?: FloatingPanelDefaults): void

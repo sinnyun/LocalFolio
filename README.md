@@ -24,10 +24,10 @@
 1. **零隔离墙、原生融合**：不套 Shadow DOM，所有 UI 插件直接运行在 DSH 主文档中，使用 `--dsw-alias-*` / `--dsw-font-family` 等宿主主题令牌，并复用平台表内置的单实例 `react`、`zod`、`@tanstack/react-virtual`（全部走 `external`，0 字节重复打包）。按钮、标签、表单、弹层、图标等基础控件由 `@folio/base-ui-kit`（Radix UI + `lucide-react` + `.lf-*` 样式）统一提供，工作台插件通过 `dsh.client.external` 零重复打包复用，**不 require `@deepseek-ai/dsh-client-ui-*`**。
 2. **插件间零直接 `import`**：每个功能都是独立 DSH 插件，通过 DSH 原生 **Cordis Service（`ctx.provide` 注册 / `inject` 依赖）** 与 **Slot 树（`ctx.slots`）** 松耦合协作，支持单插件独立启停与局部热重载（HMR）。跨插件共享界面时通过服务暴露组件（例如 `ctx.folioFrame.View`），不跨包 import。
 3. **双形态承载新面板**：
-   - **全屏可退回工作台**：挂在 DSH `shell.overlay`（`order: 1`）。Windows 桌面版（`html[data-windows-titlebar]`）把这套控件搬进 DSH 标题栏、「应用 / 编辑」之后：一个按钮在「工作台 ⇄ 返回 DSH」之间切换，工作区切换与左右面板开关同排，外壳自身不再画顶栏（无品牌标识）；Web 与 macOS 桌面保持外壳内顶栏（标识 + 返回 DSH + 切换 + 面板开关）不变。按 `Esc` 同样无损回到原生 DSH 界面；
+   - **全屏可退回工作台**：挂在 DSH `shell.overlay`（`order: 1`），结构只有两层——一条顶部条加它下面一整块内容区。Windows 桌面版（`html[data-windows-titlebar]`）不画这条顶部条，而是把控件搬进 DSH 标题栏、「应用 / 编辑」之后（一个按钮在「工作台 ⇄ 返回 DSH」之间切换，工作区切换同排，外壳自身无品牌标识）；Web 与 macOS 桌面保持外壳内顶部条（标识 + 返回 DSH + 工作区切换）。两侧面板开关由 `ctx.folioShell.registerCaptionAction` 注册、由布局框架提供，外壳只提供位置与样式。内容区完全归工作区，外壳不画底栏。按 `Esc` 同样无损回到原生 DSH 界面；
    - **自由悬浮面板**：挂在 DSH `shell.overlay`（`order: 2`），任何插件只需调用 `ctx.folioShell.registerFloatingPanel(...)` 即可获得**自由拖拽、八向缩放、一键最大化/还原、多窗置顶与位置记忆**，可悬浮在工作台或原生 DSH 之上。
 4. **每插件独立存储**：所有插件持久化数据统一落盘在 `%LOCALAPPDATA%\LocalFolio\plugins\<pluginId>\{data,cache}\`（底层优先经由 DSH `ctx.fs` 落盘缝），严禁写入 DSH 自身的 `~/.dsh/storages/workspace.json` 或会话目录。
-5. **统一布局框架**：工作区不再各自摆布四区布局，而是渲染 `ctx.folioFrame.View` 并认领宿主；工作区内部的功能插件向框架登记应用，只声明「左侧面板 / 中间内容 / 右侧面板 / 底部信息栏」显示什么。宽度调节、折叠、分隔条交互、布局持久化、应用切换、逐区错误隔离全部由框架统一托管。
+5. **统一布局框架**：需要四区的工作区把 `ctx.folioFrame.WorkspaceHost` 当作自己的 `MainView`，框架在挂载时自行认领宿主；工作区内部的功能插件向框架登记应用，只声明「左侧面板 / 中间内容 / 右侧面板 / 底部信息栏」显示什么。宽度调节、折叠、分隔条交互、布局持久化、应用切换、逐区错误隔离全部由框架统一托管。页面自带骨架的工作区（瀑布流画廊、后台、画布）直接渲染自己的全屏内容——**框架缺席是合法形态**，外壳不会因此多画任何东西。
 
 ---
 
@@ -142,7 +142,7 @@ pwsh -File scripts/lfdev.ps1 stop
    - 通过 `ctx.folioRuntime.registerAction(defineAction(...))` 注册笔记读写动作，所有注册包在 `ctx.effect` 返回清理函数。
 2. **建工作区界面插件** `plugins/workspace-notes-ui/`：
    - 声明 `dsh.client.inject: ['@folio/base-ui-kit', '@folio/base-shell-ui', '@folio/base-frame-ui']`、`dsh.client.external: ['@folio/base-ui-kit']` 与 `export const inject = ['folioFrame', 'folioShell'] as const`；
-   - 向 `ctx.folioShell.registerWorkspace(...)` 注册工作区，`MainView` 渲染 `ctx.folioFrame.View`，并调用 `ctx.folioFrame.attachHostWorkspace(workspaceId)`，同时设 `hideStatusBar: true`（底栏由框架画）；
+   - 向 `ctx.folioShell.registerWorkspace(...)` 注册工作区，`MainView` 直接写 `ctx.folioFrame.WorkspaceHost`（认领宿主由它在挂载时自己完成；外壳不画底栏，也没有 `hideStatusBar` 要设）；
    - 工作区内的各个「功能插件」只 `inject: ['folioFrame']`，用 `registerApp` 声明四区内容，彼此不 import；
    - 直接从 `@folio/base-ui-kit/client` 引入通用 shadcn/Radix 控件与图标，并可直接使用 Tailwind 工具类（由 `@folio/base-ui-kit` 的 `@source "../../";` 统一编译进单份无 Preflight 样式表，`build:watch` 自动联动刷新）；
    - 专属图标可直接 `import { ... } from 'lucide-react'`（esbuild 按图标 tree-shake，约 300B/个）；

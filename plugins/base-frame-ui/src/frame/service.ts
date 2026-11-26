@@ -1,8 +1,9 @@
-import type * as React from 'react'
+import * as React from 'react'
 import type {
   FolioFrameService,
   FrameAppDefinition,
   FrameController,
+  WorkspaceViewProps,
 } from '@folio/base-contract'
 import {
   resolveActiveApp,
@@ -47,8 +48,19 @@ export interface FolioFrameServiceOptions {
 export function createFolioFrameService(options: FolioFrameServiceOptions): FolioFrameService {
   let hostWorkspaceId: string | null = null
 
-  return {
+  const service: FolioFrameService = {
     View: options.View,
+
+    /**
+     * `MainView` for form-A workspaces. Attaching here (rather than in the
+     * workspace plugin) keeps `attachHostWorkspace` an implementation detail:
+     * a workspace author only picks this component.
+     */
+    WorkspaceHost(props: WorkspaceViewProps): React.ReactElement {
+      const { workspaceId } = props
+      React.useEffect(() => service.attachHostWorkspace(workspaceId), [workspaceId])
+      return React.createElement(options.View)
+    },
 
     registerApp(definition) {
       if (!definition || typeof definition.id !== 'string' || definition.id.trim() === '') {
@@ -98,4 +110,6 @@ export function createFolioFrameService(options: FolioFrameServiceOptions): Foli
       }
     },
   }
+
+  return service
 }

@@ -40,20 +40,6 @@ function createSafeStorage(): StateStorage {
   }
 }
 
-export interface PaneLayoutState {
-  readonly leftCollapsed: boolean
-  readonly rightCollapsed: boolean
-  readonly leftSize: number
-  readonly rightSize: number
-}
-
-export const DEFAULT_PANE_LAYOUT: PaneLayoutState = {
-  leftCollapsed: false,
-  rightCollapsed: false,
-  leftSize: 20,
-  rightSize: 22,
-}
-
 export interface FloatingPanelGeometry {
   readonly x: number
   readonly y: number
@@ -68,10 +54,13 @@ export interface PendingNavigation {
   readonly ts: number
 }
 
+/**
+ * The shell's own state. Region geometry does not live here: the shell draws no
+ * panes, so per-app widths belong to `@folio/base-frame-ui` (`folio.frame.v1`).
+ */
 export interface ShellStoreState {
   activeWorkspaceId: string
   pendingTarget: PendingNavigation | null
-  paneLayouts: Record<string, PaneLayoutState>
   openFloatingPanels: string[]
   floatingPanelRects: Record<string, FloatingPanelGeometry>
   maximizedPanels: Record<string, boolean>
@@ -80,9 +69,6 @@ export interface ShellStoreState {
   setActiveWorkspace: (id: string) => void
   setPendingTarget: (workspaceId: string, target: unknown) => void
   consumePendingTarget: (workspaceId?: string) => unknown
-  setPaneLayout: (workspaceId: string, patch: Partial<PaneLayoutState>) => void
-  toggleLeftPanel: (workspaceId: string) => void
-  toggleRightPanel: (workspaceId: string) => void
   openFloatingPanel: (id: string, defaults?: FloatingPanelDefaults) => void
   closeFloatingPanel: (id: string) => void
   toggleFloatingPanel: (id: string, defaults?: FloatingPanelDefaults) => void
@@ -94,11 +80,6 @@ export interface ShellStoreState {
   toggleMaximizeFloatingPanel: (id: string) => void
   closeTopFloatingPanel: () => boolean
   reset: () => void
-}
-
-function clampPercent(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min
-  return Math.min(max, Math.max(min, Math.round(value * 10) / 10))
 }
 
 function computeDefaultRect(
@@ -119,7 +100,6 @@ function computeDefaultRect(
 const INITIAL_DATA = {
   activeWorkspaceId: '',
   pendingTarget: null as PendingNavigation | null,
-  paneLayouts: {} as Record<string, PaneLayoutState>,
   openFloatingPanels: [] as string[],
   floatingPanelRects: {} as Record<string, FloatingPanelGeometry>,
   maximizedPanels: {} as Record<string, boolean>,
@@ -146,50 +126,6 @@ export const useShellStore = create<ShellStoreState>()(
         set({ pendingTarget: null })
         return current.target
       },
-
-      setPaneLayout: (workspaceId, patch) =>
-        set(state => {
-          const prev = state.paneLayouts[workspaceId] ?? DEFAULT_PANE_LAYOUT
-          return {
-            paneLayouts: {
-              ...state.paneLayouts,
-              [workspaceId]: {
-                leftCollapsed: patch.leftCollapsed ?? prev.leftCollapsed,
-                rightCollapsed: patch.rightCollapsed ?? prev.rightCollapsed,
-                leftSize:
-                  patch.leftSize !== undefined
-                    ? clampPercent(patch.leftSize, 12, 45)
-                    : prev.leftSize,
-                rightSize:
-                  patch.rightSize !== undefined
-                    ? clampPercent(patch.rightSize, 12, 45)
-                    : prev.rightSize,
-              },
-            },
-          }
-        }),
-
-      toggleLeftPanel: workspaceId =>
-        set(state => {
-          const prev = state.paneLayouts[workspaceId] ?? DEFAULT_PANE_LAYOUT
-          return {
-            paneLayouts: {
-              ...state.paneLayouts,
-              [workspaceId]: { ...prev, leftCollapsed: !prev.leftCollapsed },
-            },
-          }
-        }),
-
-      toggleRightPanel: workspaceId =>
-        set(state => {
-          const prev = state.paneLayouts[workspaceId] ?? DEFAULT_PANE_LAYOUT
-          return {
-            paneLayouts: {
-              ...state.paneLayouts,
-              [workspaceId]: { ...prev, rightCollapsed: !prev.rightCollapsed },
-            },
-          }
-        }),
 
       openFloatingPanel: (id, defaults) =>
         set(state => {
@@ -288,20 +224,14 @@ export const useShellStore = create<ShellStoreState>()(
       reset: () => set({ ...INITIAL_DATA }),
     }),
     {
-      name: 'folio.shell.overlay.v2',
+      // v3 drops `paneLayouts`; the previous keys' leftovers are ignored because
+      // zustand merges only the fields listed in `partialize`.
+      name: 'folio.shell.overlay.v3',
       storage: createJSONStorage(() => createSafeStorage()),
       partialize: state => ({
         activeWorkspaceId: state.activeWorkspaceId,
-        paneLayouts: state.paneLayouts,
         floatingPanelRects: state.floatingPanelRects,
       }),
     },
   ),
 )
-
-export function getPaneLayoutFor(
-  paneLayouts: Record<string, PaneLayoutState>,
-  workspaceId: string,
-): PaneLayoutState {
-  return paneLayouts[workspaceId] ?? DEFAULT_PANE_LAYOUT
-}

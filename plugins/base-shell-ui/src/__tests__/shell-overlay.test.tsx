@@ -260,8 +260,16 @@ describe('@folio/base-shell-ui (native DSH DOM + floating panels)', () => {
         title: '预览',
         order: 1,
         pluginId: '@folio/test-overview-ui',
-        LeftPanel: () => <div data-testid="left-pane" />,
         MainView: () => <div data-testid="starter-view" />,
+      })
+      controller.registerCaptionAction({
+        id: 'test.panel-action',
+        order: 5,
+        Component: ({ isOpen }) => (
+          <button type="button" data-testid="caption-action">
+            {isOpen ? 'open' : 'closed'}
+          </button>
+        ),
       })
     })
 
@@ -299,10 +307,8 @@ describe('@folio/base-shell-ui (native DSH DOM + floating panels)', () => {
     // Windows drops the in-overlay top bar entirely.
     expect(container.querySelector('[data-lf-topbar]')).toBeNull()
 
-    // The panel toggles moved up with it and still drive the pane layout.
-    fireEvent.click(document.querySelector('[data-lf-caption-tab="starter"]')!)
-    fireEvent.click(document.querySelector('[data-lf-caption-panel-left]')!)
-    expect(useShellStore.getState().paneLayouts.starter?.leftCollapsed).toBe(true)
+    // A plugin-contributed caption action renders inside the row while open.
+    expect(document.querySelector('[data-testid="caption-action"]')?.textContent).toBe('open')
 
     // The same button closes the panel again.
     fireEvent.click(toggle)

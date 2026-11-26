@@ -14,6 +14,7 @@ import {
   type TLImageShape,
   type TLShapeId,
 } from 'tldraw'
+import { importFileViaHost } from './browser-import.js'
 import {
   buildFolioLinkSrc,
   computeCanvasImageGeometry,
@@ -108,7 +109,7 @@ export interface CanvasContextValue {
   insertLinkedImages(
     paths: readonly string[],
     dropPoint?: { readonly x: number; readonly y: number },
-  ): Promise<void>
+  ): Promise<boolean>
   pickAndInsertImages(dropPoint?: { readonly x: number; readonly y: number }): Promise<void>
   relinkAsset(assetId: string, newLocalPath: string): Promise<boolean>
   pickAndRelinkImage(assetId: string): Promise<void>
@@ -122,6 +123,11 @@ export interface CanvasContextValue {
     asset: TLAsset,
     localPath: string,
   ): Promise<{ readonly src: string; readonly meta: JsonObject }>
+  importWebFile(file: File): Promise<{ readonly src: string; readonly meta: JsonObject }>
+  importDroppedFiles(
+    files: readonly File[],
+    dropPoint?: { readonly x: number; readonly y: number },
+  ): Promise<void>
   handleBlockedWebUpload(file: File): void
 }
 
@@ -595,9 +601,9 @@ export function CanvasProvider({
     async (
       paths: readonly string[],
       dropPoint?: { readonly x: number; readonly y: number },
-    ) => {
+    ): Promise<boolean> => {
       const editor = editorRef.current
-      if (!editor || paths.length === 0) return
+      if (!editor || paths.length === 0) return false
 
       try {
         const res = await rpcCall<{ readonly items: readonly LinkedImageInspectResult[] }>(
@@ -611,7 +617,7 @@ export function CanvasProvider({
             description: '请选择常见的图片格式（PNG / JPG / WebP / GIF / SVG 等）。',
             tone: 'danger',
           })
-          return
+          return false
         }
 
         const anchor = dropPoint ?? editor.getViewportPageBounds().center
@@ -684,12 +690,14 @@ export function CanvasProvider({
         await checkAllLinksWithItems(nextItems)
         await saveNow()
         void refreshCacheStats()
+        return true
       } catch (err) {
         toast({
           title: '链接图片失败',
           description: err instanceof Error ? err.message : String(err),
           tone: 'danger',
         })
+        return false
       }
     },
     [checkAllLinksWithItems, refreshCacheStats, saveNow, syncLinkedImagesFromEditor],
@@ -973,16 +981,10 @@ export function CanvasProvider({
     }
   }, [])
 
-  const linkElectronDroppedFile = React.useCallback(
-    async (_asset: TLAsset, localPath: string) => {
-      const res = await rpcCall<{ readonly items: readonly LinkedImageInspectResult[] }>(
-        'canvas.links.inspect',
-        { paths: [localPath] },
-      )
-      const inspected = res.items[0]
-      if (!inspected || !inspected.exists || !inspected.isImage) {
-        throw new Error('拖拽的文件不存在或不是受支持的图片格式')
-      }
+  const buildLinkedAssetPayload = React.useCallback(
+    (
+      inspected: LinkedImageInspectResult,
+    ): { readonly src: string; readonly meta: JsonObject } => {
       const linkId = createLinkId()
       updateLinkStatuses(prev => ({ ...prev, [linkId]: 'ok' }))
       return {
@@ -1001,17 +1003,87 @@ export function CanvasProvider({
         },
       }
     },
-    [],
+    [updateLinkStatuses],
+  )
+
+  const linkElectronDroppedFile = React.useCallback(
+    async (_asset: TLAsset, localPath: string) => {
+      const res = await rpcCall<{ readonly items: readonly LinkedImageInspectResult[] }>(
+        'canvas.links.inspect',
+        { paths: [localPath] },
+      )
+      const inspected = res.items[0]
+      if (!inspected || !inspected.exists || !inspected.isImage) {
+        throw new Error('拖拽的文件不存在或不是受支持的图片格式')
+      }
+      return buildLinkedAssetPayload(inspected)
+    },
+    [buildLinkedAssetPayload],
+  )
+
+  const importWebFile = React.useCallback(
+    async (
+      file: File,
+    ): Promise<{ readonly src: string; readonly meta: JsonObject }> => {
+      const inspected = await importFileViaHost(file)
+      return buildLinkedAssetPayload(inspected)
+    },
+    [buildLinkedAssetPayload],
   )
 
   const handleBlockedWebUpload = React.useCallback((file: File) => {
     toast({
-      title: `画板仅支持文件链接（已阻止嵌入 ${file.name}）`,
-      description: '浏览器拖入的文件缺少磁盘绝对路径，请通过「链接图片」选择器或从文件浏览器拖入。',
+      title: `未能将 ${file.name} 自动转换为链接图片`,
+      description: '浏览器拖入的文件不包含磁盘路径，自动导入未成功。请通过「链接图片」选择器或从文件浏览器拖入。',
       tone: 'info',
     })
     setPickerRequest(curr => curr ?? { mode: 'insert' })
   }, [])
+
+  const importDroppedFiles = React.useCallback(
+    async (
+      files: readonly File[],
+      dropPoint?: { readonly x: number; readonly y: number },
+    ) => {
+      if (files.length === 0) return
+
+      const importedPaths: string[] = []
+      const failedNames: string[] = []
+      for (const file of files) {
+        try {
+          const inspected = await importFileViaHost(file)
+          importedPaths.push(inspected.path)
+        } catch (err) {
+          failedNames.push(file.name || '未命名图片')
+          console.warn('[workspace-canvas-ui] 导入拖入图片失败', err)
+        }
+      }
+
+      if (importedPaths.length === 0) {
+        handleBlockedWebUpload(files[0]!)
+        return
+      }
+
+      const inserted = await insertLinkedImages(importedPaths, dropPoint)
+      if (!inserted) return
+
+      if (failedNames.length === 0) {
+        toast({
+          title: `已自动导入 ${importedPaths.length} 张拖入图片`,
+          description:
+            '浏览器无法提供原文件路径，图片已保存到本地导入目录并以链接方式加入画板；可在「图片链接」面板定位文件。',
+          tone: 'success',
+        })
+      } else {
+        toast({
+          title: `已导入 ${importedPaths.length} 张，${failedNames.length} 张失败`,
+          description: failedNames.slice(0, 3).join('、'),
+          tone: 'info',
+        })
+      }
+    },
+    [handleBlockedWebUpload, insertLinkedImages],
+  )
 
   const value: CanvasContextValue = React.useMemo(
     () => ({
@@ -1060,6 +1132,8 @@ export function CanvasProvider({
       refreshCacheStats,
       clearLodCache,
       linkElectronDroppedFile,
+      importWebFile,
+      importDroppedFiles,
       handleBlockedWebUpload,
     }),
     [
@@ -1103,6 +1177,8 @@ export function CanvasProvider({
       refreshCacheStats,
       clearLodCache,
       linkElectronDroppedFile,
+      importWebFile,
+      importDroppedFiles,
       handleBlockedWebUpload,
     ],
   )

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="LocalFolio Materials Workspace">
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#131926"/>
+  <rect x="10" y="14" width="11" height="36" rx="3" fill="#1e293b" stroke="#475569" stroke-width="2"/>
+  <path d="M13 21h5M13 27h5M13 33h4" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>
+  <rect x="25" y="14" width="29" height="36" rx="3" fill="#0f172a" stroke="#38bdf8" stroke-width="2"/>
+  <rect x="28" y="18" width="23" height="6" rx="1.5" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.2"/>
+  <path d="M30 21h6M41 21h8" stroke="#e0f2fe" stroke-width="1.6" stroke-linecap="round"/>
+  <rect x="29" y="29" width="21" height="16" rx="2" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+  <path d="M33 35h13M33 40h9" stroke="#34d399" stroke-width="2" stroke-linecap="round"/>
+</svg>

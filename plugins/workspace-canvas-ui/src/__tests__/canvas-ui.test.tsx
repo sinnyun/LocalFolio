@@ -32,7 +32,11 @@ import {
   createCanvasApp,
   createFolioAssetStore,
   extractLocalPathsFromText,
+  importFileViaHost,
+  isDroppedImageFile,
+  resolveDroppedFilePath,
   stripInlineImagesFromSnapshot,
+  bytesToBase64,
   useCanvas,
   type BoardDocument,
   type BoardMeta,
@@ -66,8 +70,16 @@ describe('LOD & link-only pure helpers', () => {
     expect(urls.icons['tool-arrow']).toContain('/lf/canvas/tldraw-asset?f=icons%2F')
   })
 
-  it('blocks web base64 upload, resolves LOD or broken placeholder, and strips inline data URLs', async () => {
+  it('imports pathless web images through the host, resolves LOD or broken placeholder, and strips inline data URLs', async () => {
     const blocked = vi.fn()
+    const imported = vi.fn(async (file: File) => ({
+      src: buildFolioLinkSrc('web-1'),
+      meta: {
+        folioLink: true,
+        linkId: 'web-1',
+        localPath: `C:\\Folio\\imports\\${file.name}`,
+      },
+    }))
     let status: 'ok' | 'missing' = 'ok'
 
     const assetStore = createFolioAssetStore({
@@ -77,13 +89,20 @@ describe('LOD & link-only pure helpers', () => {
         src: buildFolioLinkSrc('e1'),
         meta: { folioLink: true, linkId: 'e1', localPath },
       }),
+      onWebFileImport: imported,
     })
 
     const fakeFile = new File([new Uint8Array([1, 2, 3])], 'raw.png', { type: 'image/png' })
+    const uploaded = await assetStore.upload({ id: 'asset:1' } as TLAsset, fakeFile)
+    expect(uploaded.src).toBe(buildFolioLinkSrc('web-1'))
+    expect(imported).toHaveBeenCalledWith(fakeFile)
+    expect(blocked).not.toHaveBeenCalled()
+
+    const textFile = new File(['hello'], 'notes.txt', { type: 'text/plain' })
     await expect(
-      assetStore.upload({ id: 'asset:1' } as TLAsset, fakeFile),
+      assetStore.upload({ id: 'asset:2' } as TLAsset, textFile),
     ).rejects.toThrow()
-    expect(blocked).toHaveBeenCalledWith(fakeFile)
+    expect(blocked).toHaveBeenCalledWith(textFile)
 
     const linkedAsset = {
       id: 'asset:link',
@@ -149,6 +168,33 @@ describe('LOD & link-only pure helpers', () => {
     expect(
       extractLocalPathsFromText('"C:\\Temp\\pic.png"\nhttps://example.com/a.png\nD:\\Docs\\note.txt'),
     ).toEqual(['C:\\Temp\\pic.png'])
+  })
+
+  it('resolves disk paths from the legacy File.path slot and the DSH desktop bridge', () => {
+    const pathless = new File([new Uint8Array([1])], '拖入.png', { type: 'image/png' })
+    expect(resolveDroppedFilePath(pathless)).toBeNull()
+    expect(isDroppedImageFile(pathless)).toBe(true)
+    expect(
+      isDroppedImageFile(new File(['text'], 'notes.txt', { type: 'text/plain' })),
+    ).toBe(false)
+    expect(
+      isDroppedImageFile({ name: 'extension-only.webp', type: '' } as unknown as File),
+    ).toBe(true)
+
+    const legacy = { name: 'a.png', type: 'image/png', path: 'D:\\Pics\\a.png' } as unknown as File
+    expect(resolveDroppedFilePath(legacy)).toBe('D:\\Pics\\a.png')
+
+    ;(globalThis as { __DSH_HOST_PATHS__?: unknown }).__DSH_HOST_PATHS__ = {
+      pathFor: (file: File) => `D:\\Bridged\\${file.name}`,
+    }
+    try {
+      expect(resolveDroppedFilePath(pathless)).toBe('D:\\Bridged\\拖入.png')
+    } finally {
+      delete (globalThis as { __DSH_HOST_PATHS__?: unknown }).__DSH_HOST_PATHS__
+    }
+
+    expect(bytesToBase64(new Uint8Array([72, 105]))).toBe('SGk=')
+    expect(bytesToBase64(new Uint8Array(0))).toBe('')
   })
 
   it('passes real tldraw store schema validation when inserting linked image assets and shapes', () => {
@@ -261,6 +307,9 @@ describe('@folio/workspace-canvas-ui integration', () => {
   let existingFiles: Set<string>
   let nextPickImage: string | null
   let nextPickFolder: string | null
+  let importSessions: Map<string, { fileName: string; chunks: string[] }>
+  let lastImportedChunks: string[]
+  let importSeq: number
 
   function createMockEditor(boardId: string): Editor {
     const records = new Map<string, Record<string, unknown>>()
@@ -343,13 +392,19 @@ describe('@folio/workspace-canvas-ui integration', () => {
       setRelinkPanelOpen,
       setRelinkFilter,
       attachEditor,
+      importDroppedFiles,
     } = useCanvas()
 
+    const [attachedBoardId, setAttachedBoardId] = React.useState<string | null>(null)
     React.useEffect(() => {
       if (!activeDoc || activeDoc.id !== activeBoardId) return
       const editor = createMockEditor(activeBoardId)
       attachEditor(editor)
-      return () => attachEditor(null)
+      setAttachedBoardId(activeBoardId)
+      return () => {
+        attachEditor(null)
+        setAttachedBoardId(null)
+      }
     }, [activeBoardId, activeDoc?.id, attachEditor])
 
     return (
@@ -363,6 +418,7 @@ describe('@folio/workspace-canvas-ui integration', () => {
         }}
       >
         <div data-lf-mock-tldraw={activeBoardId}>
+          <span data-lf-mock-attached-editor={attachedBoardId ?? ''} />
           <button
             type="button"
             data-lf-canvas-links-pill=""
@@ -374,6 +430,24 @@ describe('@folio/workspace-canvas-ui integration', () => {
             {brokenCount > 0
               ? `${brokenCount} 张图片已移动 · 重新链接`
               : `图片链接 (${linkedImages.length})`}
+          </button>
+          <button
+            type="button"
+            data-lf-test-drop-import=""
+            onClick={() => {
+              const bytes = new Uint8Array([137, 80, 78, 71])
+              const dropped = {
+                name: '拖入的截图.png',
+                type: 'image/png',
+                size: bytes.length,
+                slice: (start: number, end: number) => ({
+                  arrayBuffer: async () => bytes.slice(start, end).buffer,
+                }),
+              } as unknown as File
+              void importDroppedFiles([dropped])
+            }}
+          >
+            drop-image
           </button>
         </div>
         <LinkedImagesPanel />
@@ -387,6 +461,9 @@ describe('@folio/workspace-canvas-ui integration', () => {
     existingFiles = new Set(['D:\\Moved\\poster.png'])
     nextPickImage = 'D:\\Moved\\poster.png'
     nextPickFolder = 'D:\\Moved'
+    importSessions = new Map()
+    lastImportedChunks = []
+    importSeq = 0
 
     const now = Date.now()
     boardsState = [
@@ -524,6 +601,55 @@ describe('@folio/workspace-canvas-ui integration', () => {
               strippedInlineCount: 0,
             })
           }
+          case 'canvas.links.importBegin': {
+            importSeq += 1
+            const importId = `import-${importSeq}`
+            importSessions.set(importId, {
+              fileName: String(body.fileName ?? 'import.png'),
+              chunks: [],
+            })
+            return ok({ importId, chunkBytes: 1024 * 1024, maxBytes: 128 * 1024 * 1024 })
+          }
+          case 'canvas.links.importChunk': {
+            const session = importSessions.get(String(body.importId))
+            if (!session) {
+              return new Response(
+                JSON.stringify({
+                  ok: false,
+                  error: { code: 'import_session_missing', message: '导入会话不存在' },
+                }),
+                { status: 404, headers: { 'content-type': 'application/json' } },
+              )
+            }
+            session.chunks.push(String(body.data ?? ''))
+            return ok({ receivedBytes: session.chunks.join('').length })
+          }
+          case 'canvas.links.importFinish': {
+            const importId = String(body.importId)
+            const session = importSessions.get(importId)
+            importSessions.delete(importId)
+            lastImportedChunks = session?.chunks ?? []
+            const importedPath = `C:\\Folio\\imports\\${importSeq}\\${session?.fileName ?? 'import.png'}`
+            existingFiles.add(importedPath)
+            return ok({
+              item: {
+                path: importedPath,
+                exists: true,
+                fileName: session?.fileName ?? 'import.png',
+                ext: '.png',
+                mime: 'image/png',
+                size: 4,
+                mtimeMs: Date.now(),
+                naturalWidth: 1200,
+                naturalHeight: 800,
+                isImage: true,
+              },
+            })
+          }
+          case 'canvas.links.importAbort': {
+            importSessions.delete(String(body.importId))
+            return ok({ aborted: true })
+          }
           case 'canvas.links.check': {
             const paths = (body.paths as string[]) ?? []
             return ok({
@@ -604,6 +730,81 @@ describe('@folio/workspace-canvas-ui integration', () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+  })
+
+  it('streams pathless dropped image bytes to the host in RPC-sized chunks', async () => {
+    const payload = new Uint8Array(1024 * 1024 * 2 + 17)
+    for (let index = 0; index < payload.length; index += 1) payload[index] = index % 251
+    let sliceCalls = 0
+
+    const fakeFile = {
+      name: '5-1-1.png',
+      type: 'image/png',
+      size: payload.length,
+      slice(start: number, end: number) {
+        sliceCalls += 1
+        return { arrayBuffer: async () => payload.slice(start, end).buffer }
+      },
+    } as unknown as File
+
+    const item = await importFileViaHost(fakeFile)
+    expect(item.fileName).toBe('5-1-1.png')
+    expect(item.exists).toBe(true)
+    expect(sliceCalls).toBe(3)
+    expect(lastImportedChunks).toHaveLength(3)
+    for (const chunk of lastImportedChunks) {
+      // base64 of a 1 MiB chunk stays below the shared 2 MB RPC body ceiling
+      expect(chunk.length).toBeLessThanOrEqual(1_398_104)
+    }
+    const decoded = Buffer.concat(lastImportedChunks.map(chunk => Buffer.from(chunk, 'base64')))
+    expect(decoded.equals(Buffer.from(payload))).toBe(true)
+  })
+
+  it('auto-imports a pathless dropped image and adds it as a linked image', async () => {
+    frameStore.reset()
+    const frame = createFolioFrameService({
+      View: FrameWorkbench,
+      openWorkspace: vi.fn(),
+    })
+    frame.registerApp(createCanvasApp({ CanvasStageComponent: TestCanvasStage }))
+    frame.attachHostWorkspace(CANVAS_WORKSPACE_ID)
+    frame.activateApp(CANVAS_APP_ID)
+
+    render(
+      React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(FolioUiHost),
+        React.createElement(
+          'div',
+          { 'data-lf-shell': '', style: { width: 1200, height: 800 } },
+          React.createElement(FrameWorkbench),
+        ),
+      ),
+    )
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-lf-canvas-board-btn="board-2"]')).toBeTruthy()
+    })
+    fireEvent.click(document.querySelector('[data-lf-canvas-board-btn="board-2"]')!)
+    await waitFor(() => {
+      expect(document.querySelector('[data-lf-mock-tldraw="board-2"]')).toBeTruthy()
+      expect(
+        document.querySelector('[data-lf-mock-attached-editor="board-2"]'),
+      ).toBeTruthy()
+    })
+
+    fireEvent.click(document.querySelector('[data-lf-test-drop-import]')!)
+    await waitFor(() => {
+      expect(screen.getByText('图片链接 (1)')).toBeTruthy()
+    })
+
+    fireEvent.click(document.querySelector('[data-lf-canvas-links-pill]')!)
+    await waitFor(() => {
+      expect(document.querySelector('[data-lf-canvas-relink-panel]')).toBeTruthy()
+      expect(screen.getByText('拖入的截图.png')).toBeTruthy()
+    })
+    expect(existingFiles.has('C:\\Folio\\imports\\1\\拖入的截图.png')).toBe(true)
   })
 
   it('renders left board list and full right canvas area, detects broken links, and relinks via mini-panel', async () => {

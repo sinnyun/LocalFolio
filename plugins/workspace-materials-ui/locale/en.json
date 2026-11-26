@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Materials",
+    "description": "Local VectorCraft-powered material layout workspace: left project sidebar, Layer 1 multi-select image/PDF export, Layer 2 slide-style reordering & header editor with bidirectional CLI/live sync, and default/project material data tables.",
+    "detail": "docs/DETAIL.md"
+  }
+}

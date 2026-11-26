@@ -3,7 +3,7 @@
   "version": "0.3.0-alpha.0",
   "private": true,
   "type": "module",
-  "description": "DSH host plugin for LocalFolio Canvas workspace: board persistence, link-only image inspection/relinking, WIC+Shell LOD image proxy with disk cache, native file/folder dialogs, and self-hosted @tldraw/assets.",
+  "description": "DSH host plugin for LocalFolio Canvas workspace: board persistence, link-only image inspection/relinking, chunked browser-drop image import, WIC+Shell LOD image proxy with disk cache, native file/folder dialogs, and self-hosted @tldraw/assets.",
   "main": "./lib/index.js",
   "exports": {
     ".": "./lib/index.js",

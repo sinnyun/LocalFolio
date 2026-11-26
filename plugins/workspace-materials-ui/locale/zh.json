@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "物料",
+    "description": "基于本地 VectorCraft 程序与 CLI 的物料整理与排版工作区：左侧项目管理多个 .vectorcraft 文件，右侧支持页面多选导出单图/多页 PDF、幻灯片式拖拽排序与顶部物料信息双向同步、以及默认与项目物料数据表格管理。",
+    "detail": "docs/DETAIL.md"
+  }
+}

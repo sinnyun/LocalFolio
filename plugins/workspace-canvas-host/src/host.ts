@@ -6,6 +6,7 @@ import {
   type FolioStorageService,
 } from '@folio/base-contract'
 import { createBoardsManager } from './boards.js'
+import { createDropImportManager } from './drop-import.js'
 import {
   checkLinkedImages,
   inspectLinkedImage,
@@ -44,6 +45,9 @@ export function registerWorkspaceCanvasHost(
 
   const pluginStorage = storage.forPlugin('workspace-canvas-host')
   const boards = createBoardsManager(pluginStorage)
+  const dropImports = createDropImportManager({
+    importsDir: pluginStorage.dataPath('imports'),
+  })
 
   const disposers = [
     runtime.registerAction(
@@ -162,6 +166,63 @@ export function registerWorkspaceCanvasHost(
         run: async input => ({
           items: await Promise.all(input.paths.map(p => inspectLinkedImage(p))),
         }),
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'canvas.links.importBegin',
+        title: '开始接收浏览器拖入的图片',
+        description: '为浏览器拖入的图片创建分块导入会话，写入画板托管导入目录。',
+        tier: 'modify',
+        input: z.object({
+          fileName: z.string().min(1).max(512),
+          mime: z.string().max(160).optional(),
+          size: z.number().int().min(0).optional(),
+        }),
+        run: async input => dropImports.begin(input),
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'canvas.links.importChunk',
+        title: '写入浏览器拖入的图片分片',
+        description: '追加一段 base64 图片分片；单段不超过 1 MB，避开 2 MB RPC 请求体上限。',
+        tier: 'modify',
+        input: z.object({
+          importId: z.string().min(1),
+          data: z.string().min(1).max(1_500_000),
+        }),
+        run: async input => dropImports.append(input.importId, input.data),
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'canvas.links.importFinish',
+        title: '完成浏览器拖入图片的导入',
+        description: '落盘到画板托管导入目录，并返回可直接建立文件链接的图片信息。',
+        tier: 'modify',
+        input: z.object({
+          importId: z.string().min(1),
+        }),
+        run: async input => ({ item: await dropImports.finish(input.importId) }),
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'canvas.links.importAbort',
+        title: '取消浏览器拖入图片的导入',
+        tier: 'modify',
+        input: z.object({
+          importId: z.string().min(1),
+        }),
+        run: async input => {
+          await dropImports.abort(input.importId)
+          return { aborted: true }
+        },
       }),
     ),
 
@@ -302,6 +363,7 @@ export function registerWorkspaceCanvasHost(
 
   return () => {
     for (const dispose of disposers.reverse()) dispose()
+    dropImports.dispose()
     if (ownsProxyProvider) {
       proxyProvider.dispose()
     }
@@ -325,6 +387,13 @@ export function apply(ctx: Context): void {
 export default { name, inject, apply }
 
 export { createBoardsManager, sanitizeBoardSnapshot } from './boards.js'
+export {
+  createDropImportManager,
+  IMPORT_CHUNK_BYTES,
+  MAX_IMPORT_BYTES,
+  resolveImportFileName,
+} from './drop-import.js'
+export type { DropImportManager, ImportBeginInput, ImportBeginResult } from './drop-import.js'
 export {
   checkLinkedImages,
   classifyImageFile,

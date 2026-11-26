@@ -359,4 +359,199 @@ describe('@folio/base-shell-ui (native DSH DOM + floating panels)', () => {
     expect(isEditableEventTarget({ composedPath: () => [input] } as unknown as Event)).toBe(true)
     errSpy.mockRestore()
   })
+
+  it('isolates file drag-and-drop inside the overlay and floating panels without reaching document DSH listeners', async () => {
+    const registeredSlots = new Map<
+      string,
+      Array<{ id?: string; Component: React.ComponentType<any> }>
+    >()
+    const slots: DshSlotsLike = {
+      inject(_name, install) {
+        const d = install()
+        return () => d?.()
+      },
+      register(spec, Component) {
+        const list = registeredSlots.get(spec.name) ?? []
+        const entry = { id: spec.id, Component }
+        list.push(entry)
+        registeredSlots.set(spec.name, list)
+        return () => {
+          const cur = registeredSlots.get(spec.name)
+          if (!cur) return
+          const i = cur.indexOf(entry)
+          if (i >= 0) cur.splice(i, 1)
+        }
+      },
+    }
+
+    const controller = createShellController(true)
+    const plugin = createShellOverlayPlugin({ enableEvents: false, controller })
+    const cleanups: Array<() => void> = []
+    const fakeCtx = {
+      slots,
+      provide: () => () => {},
+      get: () => undefined,
+      effect(fn: () => () => void) {
+        cleanups.push(fn())
+      },
+    } as unknown as Context
+
+    plugin.apply(fakeCtx)
+
+    const wsDragOverCalls: string[] = []
+    const wsDropCalls: string[] = []
+    let disposeWs = () => {}
+    let disposePanel = () => {}
+    act(() => {
+      disposeWs = controller.registerWorkspace({
+        id: 'files',
+        title: '文件',
+        order: 1,
+        MainView: () => (
+          <div data-testid="ws-root">
+            <div data-testid="ws-empty">empty</div>
+            <div
+              data-testid="ws-dropzone"
+              onDragOver={e => {
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'copy'
+                wsDragOverCalls.push(e.dataTransfer.dropEffect)
+              }}
+              onDrop={e => {
+                e.preventDefault()
+                wsDropCalls.push('dropped')
+              }}
+            >
+              dropzone
+            </div>
+          </div>
+        ),
+      })
+      disposePanel = controller.registerFloatingPanel({
+        id: 'float.drop',
+        title: '浮窗',
+        Component: () => <div data-testid="float-inner">inner</div>,
+      })
+    })
+
+    const Overlay = registeredSlots
+      .get('shell.overlay')!
+      .find(entry => entry.id === 'folio.shell.overlay')!.Component
+    const Floating = registeredSlots
+      .get('shell.overlay')!
+      .find(entry => entry.id === 'folio.shell.floating')!.Component
+
+    const { container } = render(
+      <div>
+        <div data-testid="outside-dsh">outside</div>
+        <Overlay />
+        <Floating />
+      </div>,
+    )
+
+    const docDragEnter = vi.fn()
+    const docDragOver = vi.fn()
+    const docDragLeave = vi.fn()
+    const docDrop = vi.fn()
+    document.addEventListener('dragenter', docDragEnter)
+    document.addEventListener('dragover', docDragOver)
+    document.addEventListener('dragleave', docDragLeave)
+    document.addEventListener('drop', docDrop)
+
+    const makeDragEvent = (type: string, types: string[]): Event & { dataTransfer: DataTransfer } => {
+      const ev = new Event(type, { bubbles: true, cancelable: true }) as Event & {
+        dataTransfer: DataTransfer
+      }
+      const dataTransfer = {
+        types,
+        dropEffect: 'move',
+        effectAllowed: 'all',
+        files: [] as unknown as FileList,
+        items: [] as unknown as DataTransferItemList,
+        getData: () => '',
+        setData: () => {},
+      } as unknown as DataTransfer
+      Object.defineProperty(ev, 'dataTransfer', { value: dataTransfer })
+      return ev
+    }
+
+    try {
+      const wsEmpty = container.querySelector('[data-testid="ws-empty"]')!
+      const wsDropzone = container.querySelector('[data-testid="ws-dropzone"]')!
+
+      // 1. Open overlay: empty workspace area blocks DSH document drop + prevents browser navigation + sets dropEffect='none'
+      const enterEmpty = makeDragEvent('dragenter', ['Files'])
+      wsEmpty.dispatchEvent(enterEmpty)
+      const overEmpty = makeDragEvent('dragover', ['Files'])
+      wsEmpty.dispatchEvent(overEmpty)
+      const dropEmpty = makeDragEvent('drop', ['Files'])
+      wsEmpty.dispatchEvent(dropEmpty)
+
+      expect(enterEmpty.defaultPrevented).toBe(true)
+      expect(overEmpty.defaultPrevented).toBe(true)
+      expect(overEmpty.dataTransfer.dropEffect).toBe('none')
+      expect(dropEmpty.defaultPrevented).toBe(true)
+      expect(docDragEnter).not.toHaveBeenCalled()
+      expect(docDragOver).not.toHaveBeenCalled()
+      expect(docDrop).not.toHaveBeenCalled()
+
+      // 2. Open overlay: workspace dropzone receives React dragover/drop first, preserves dropEffect='copy', and still isolates document
+      const overZone = makeDragEvent('dragover', ['Files'])
+      wsDropzone.dispatchEvent(overZone)
+      const dropZone = makeDragEvent('drop', ['Files'])
+      wsDropzone.dispatchEvent(dropZone)
+
+      expect(wsDragOverCalls).toEqual(['copy'])
+      expect(wsDropCalls).toEqual(['dropped'])
+      expect(overZone.dataTransfer.dropEffect).toBe('copy')
+      expect(docDragOver).not.toHaveBeenCalled()
+      expect(docDrop).not.toHaveBeenCalled()
+
+      // 3. Open overlay: dragging across document.body (e.g., Windows titlebar area) is also isolated before document
+      const bodyDrop = makeDragEvent('drop', ['application/x-dsh-file-drag'])
+      document.body.dispatchEvent(bodyDrop)
+      expect(bodyDrop.defaultPrevented).toBe(true)
+      expect(docDrop).not.toHaveBeenCalled()
+
+      // 4. Open overlay: non-file drag does not call preventDefault() yet stays stopped from DSH document listeners
+      const textDrop = makeDragEvent('drop', ['text/plain'])
+      wsEmpty.dispatchEvent(textDrop)
+      expect(textDrop.defaultPrevented).toBe(false)
+      expect(docDrop).not.toHaveBeenCalled()
+
+      // 5. Closed overlay: page drops reach DSH document listeners, while an open FloatingPanel isolates drops inside it
+      act(() => {
+        controller.close()
+        controller.openFloatingPanel('float.drop')
+      })
+      await waitFor(() => {
+        expect(container.querySelector('[data-lf-overlay]')).toBeNull()
+        expect(container.querySelector('[data-testid="float-inner"]')).not.toBeNull()
+      })
+
+      const floatInner = container.querySelector('[data-testid="float-inner"]')!
+      const floatDrop = makeDragEvent('drop', ['Files'])
+      floatInner.dispatchEvent(floatDrop)
+      expect(floatDrop.defaultPrevented).toBe(true)
+      expect(docDrop).not.toHaveBeenCalled()
+
+      const outside = container.querySelector('[data-testid="outside-dsh"]')!
+      const outsideEnter = makeDragEvent('dragenter', ['Files'])
+      const outsideDrop = makeDragEvent('drop', ['Files'])
+      outside.dispatchEvent(outsideEnter)
+      outside.dispatchEvent(outsideDrop)
+      expect(docDragEnter).toHaveBeenCalledTimes(1)
+      expect(docDrop).toHaveBeenCalledTimes(1)
+    } finally {
+      document.removeEventListener('dragenter', docDragEnter)
+      document.removeEventListener('dragover', docDragOver)
+      document.removeEventListener('dragleave', docDragLeave)
+      document.removeEventListener('drop', docDrop)
+      act(() => {
+        disposePanel()
+        disposeWs()
+      })
+      for (const c of cleanups) c()
+    }
+  })
 })

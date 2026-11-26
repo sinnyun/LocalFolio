@@ -13,6 +13,7 @@ import { FloatingPanelHost } from './shell/FloatingPanelHost.js'
 import { FolioShell } from './shell/FolioShell.js'
 import { useShellStore } from './shell/shell-store.js'
 import { useWindowsCaptionMode } from './shell/caption.js'
+import { useDragIsolation } from './shell/drag-isolation.js'
 import { useShortcutIsolation, type DshShortcutService } from './shell/shortcuts.js'
 
 const OVERLAY_SLOT = 'shell.overlay'
@@ -357,6 +358,8 @@ export function createShellOverlayPlugin(options: CreateShellOverlayPluginOption
           onEscape: () => controller.close(),
         })
 
+        useDragIsolation(isOpen)
+
         React.useEffect(() => {
           if (!isOpen) return undefined
           const el = overlayRef.current
@@ -477,3 +480,8 @@ export {
 } from './shell/caption.js'
 export { FloatingPanelHost, clampFloatingRect } from './shell/FloatingPanelHost.js'
 export { isEditableEventTarget, useShortcutIsolation } from './shell/shortcuts.js'
+export {
+  createDragBoundaryHandlers,
+  isFileDragEvent,
+  useDragIsolation,
+} from './shell/drag-isolation.js'

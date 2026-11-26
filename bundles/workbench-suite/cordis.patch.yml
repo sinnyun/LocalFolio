@@ -28,3 +28,7 @@
       name: '@folio/workspace-canvas-host'
     - id: workspace-canvas-ui
       name: '@folio/workspace-canvas-ui'
+    - id: workspace-materials-host
+      name: '@folio/workspace-materials-host'
+    - id: workspace-materials-ui
+      name: '@folio/workspace-materials-ui'

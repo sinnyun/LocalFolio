@@ -9,7 +9,9 @@ import {
 import { createFolioStorageService } from '../../../base-storage-host/src/host.js'
 import {
   createWindowsWicImageProxyProvider,
+  MAX_IMPORT_BYTES,
   registerWorkspaceCanvasHost,
+  resolveImportFileName,
   sanitizeBoardSnapshot,
   snapLodTier,
   type CanvasDialogProvider,
@@ -248,6 +250,118 @@ describe('@folio/workspace-canvas-host', () => {
     expect(relocateRes.matches[0]?.inspected.path).toBe(
       path.resolve(path.join(sampleRoot, 'nested', 'moved-photo.png')),
     )
+  })
+
+  it('normalizes browser drop file names into safe image names', () => {
+    expect(resolveImportFileName('5-1-1.png')).toBe('5-1-1.png')
+    expect(resolveImportFileName('clipboard', 'image/png')).toBe('clipboard.png')
+    expect(resolveImportFileName('..\\..\\escape.png')).toBe('escape.png')
+    expect(resolveImportFileName('weird:name*.PNG')).toBe('weird_name_.PNG')
+    expect(resolveImportFileName('CON.png')).toBe('_CON.png')
+    expect(resolveImportFileName('notes.txt')).toBeNull()
+    expect(resolveImportFileName('scan', 'application/pdf')).toBeNull()
+  })
+
+  it('imports browser-dropped image bytes into the managed imports folder in chunks', async () => {
+    const begin = await runtime.executeAction<{ importId: string; chunkBytes: number }>(
+      'canvas.links.importBegin',
+      { fileName: '5-1-1.png', mime: 'image/png', size: TINY_PNG.length },
+    )
+    expect(begin.chunkBytes).toBe(1024 * 1024)
+
+    const half = Math.ceil(TINY_PNG.length / 2)
+    const first = await runtime.executeAction<{ receivedBytes: number }>(
+      'canvas.links.importChunk',
+      {
+        importId: begin.importId,
+        data: TINY_PNG.subarray(0, half).toString('base64'),
+      },
+    )
+    expect(first.receivedBytes).toBe(half)
+
+    await runtime.executeAction('canvas.links.importChunk', {
+      importId: begin.importId,
+      data: TINY_PNG.subarray(half).toString('base64'),
+    })
+
+    const finished = await runtime.executeAction<{ item: LinkedImageInspectResult }>(
+      'canvas.links.importFinish',
+      { importId: begin.importId },
+    )
+    expect(finished.item).toMatchObject({
+      exists: true,
+      isImage: true,
+      fileName: '5-1-1.png',
+      naturalWidth: 2,
+      naturalHeight: 3,
+    })
+    const importsDir = path.join(
+      dataDir,
+      'plugins',
+      'workspace-canvas-host',
+      'data',
+      'imports',
+    )
+    expect(path.dirname(finished.item.path).toLowerCase()).toBe(
+      path.resolve(importsDir).toLowerCase(),
+    )
+    expect((await fsp.readFile(finished.item.path)).equals(TINY_PNG)).toBe(true)
+
+    // The same dropped name must not overwrite an earlier import.
+    const again = await runtime.executeAction<{ importId: string }>(
+      'canvas.links.importBegin',
+      { fileName: '5-1-1.png', mime: 'image/png' },
+    )
+    await runtime.executeAction('canvas.links.importChunk', {
+      importId: again.importId,
+      data: TINY_PNG.toString('base64'),
+    })
+    const second = await runtime.executeAction<{ item: LinkedImageInspectResult }>(
+      'canvas.links.importFinish',
+      { importId: again.importId },
+    )
+    expect(second.item.fileName).toBe('5-1-1 (2).png')
+    expect(second.item.path).not.toBe(finished.item.path)
+  })
+
+  it('rejects non-image and oversized browser drops and cleans up aborted sessions', async () => {
+    await expect(
+      runtime.executeAction('canvas.links.importBegin', { fileName: 'notes.txt' }),
+    ).rejects.toThrow(/图片格式/)
+
+    await expect(
+      runtime.executeAction('canvas.links.importBegin', {
+        fileName: 'huge.png',
+        size: MAX_IMPORT_BYTES + 1,
+      }),
+    ).rejects.toThrow(/上限/)
+
+    const begin = await runtime.executeAction<{ importId: string }>(
+      'canvas.links.importBegin',
+      { fileName: 'clipboard', mime: 'image/png' },
+    )
+    await runtime.executeAction('canvas.links.importChunk', {
+      importId: begin.importId,
+      data: TINY_PNG.toString('base64'),
+    })
+
+    const stagingDir = path.join(
+      dataDir,
+      'plugins',
+      'workspace-canvas-host',
+      'data',
+      'imports',
+      '.staging',
+    )
+    const stagedBefore = (await fsp.readdir(stagingDir)).filter(name => name.endsWith('.part'))
+    expect(stagedBefore.length).toBeGreaterThan(0)
+
+    await runtime.executeAction('canvas.links.importAbort', { importId: begin.importId })
+    const stagedAfter = (await fsp.readdir(stagingDir)).filter(name => name.endsWith('.part'))
+    expect(stagedAfter).toHaveLength(0)
+    await expect(
+      runtime.executeAction('canvas.links.importFinish', { importId: begin.importId }),
+    ).rejects.toThrow()
   })
 
   it('serves snapped LOD proxies with disk caching, ETag 304, missing 404, and cache clearing', async () => {

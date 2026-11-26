@@ -318,6 +318,33 @@ export function createDefaultPluginManifest(): PluginManifest {
           '@folio/workspace-canvas-host',
         ],
       },
+      {
+        id: 'workspace-materials-host',
+        name: '物料工作区后端',
+        loaderId: '@folio/workspace-materials-host',
+        category: 'workspace',
+        slots: [],
+        services: [],
+        description: '提供本地 VectorCraft CLI 与前台实时控制通道桥接、A3 横版物料信息头双向同步、图片与多页 PDF 导出及物料数据管理。',
+        enabled: true,
+        dependsOn: ['@folio/base-runtime-host', '@folio/base-storage-host'],
+      },
+      {
+        id: 'workspace-materials-ui',
+        name: '物料',
+        loaderId: '@folio/workspace-materials-ui',
+        category: 'workspace',
+        slots: [],
+        services: [],
+        description: '基于 VectorCraft 的物料整理与排版工作区：左侧项目管理、第一层多选导出单图/多页 PDF、第二层幻灯片式拖拽排序与快捷物料信息编辑、以及默认/项目数据表格管理。',
+        enabled: true,
+        dependsOn: [
+          '@folio/base-ui-kit',
+          '@folio/base-shell-ui',
+          '@folio/base-frame-ui',
+          '@folio/workspace-materials-host',
+        ],
+      },
     ],
     internalExtensions: [
       {

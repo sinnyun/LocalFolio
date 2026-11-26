@@ -36,7 +36,9 @@
     "@folio/workspace-canvas-host": "link:../../plugins/workspace-canvas-host",
     "@folio/workspace-canvas-ui": "link:../../plugins/workspace-canvas-ui",
     "@folio/workspace-files-host": "link:../../plugins/workspace-files-host",
-    "@folio/workspace-files-ui": "link:../../plugins/workspace-files-ui"
+    "@folio/workspace-files-ui": "link:../../plugins/workspace-files-ui",
+    "@folio/workspace-materials-host": "link:../../plugins/workspace-materials-host",
+    "@folio/workspace-materials-ui": "link:../../plugins/workspace-materials-ui"
   },
   "engines": {
     "dsh": "^0.2.2-rc.5"

@@ -3,7 +3,7 @@
   "version": "0.3.0-alpha.0",
   "private": true,
   "type": "module",
-  "description": "LocalFolio Canvas workspace powered by tldraw: left board list sidebar, full edge-to-edge tldraw canvas, link-only local image management, LOD proxy resolution, and broken-link relink mini-panel.",
+  "description": "LocalFolio Canvas workspace powered by tldraw: left board list sidebar, full edge-to-edge tldraw canvas, link-only local image management, automatic browser-drop import into a managed imports folder, LOD proxy resolution, and broken-link relink mini-panel.",
   "main": "./lib/index.js",
   "exports": {
     ".": "./lib/index.js",

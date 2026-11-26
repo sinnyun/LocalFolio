@@ -1,0 +1,210 @@
+import type { CatalogState, MaterialOptionItem, MaterialTemplateItem } from './types.js'
+
+const SEED_TS = 1760000000000
+
+function opt(
+  id: string,
+  category: MaterialOptionItem['category'],
+  value: string,
+  description: string,
+  sortOrder: number,
+): MaterialOptionItem {
+  return {
+    id,
+    category,
+    label: value,
+    value,
+    description,
+    sortOrder,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
+  }
+}
+
+function tpl(
+  id: string,
+  name: string,
+  title: string,
+  material: string,
+  craft: string,
+  size: string,
+  quantity: string,
+  note: string,
+  sortOrder: number,
+  showProjectName = false,
+): MaterialTemplateItem {
+  return {
+    id,
+    name,
+    title,
+    material,
+    craft,
+    size,
+    quantity,
+    note,
+    showProjectName,
+    sortOrder,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
+  }
+}
+
+export function createDefaultCatalog(): CatalogState {
+  return {
+    version: 1,
+    defaultOptions: [
+      // 常用标题
+      opt('def-title-1', 'title', '主舞台背景板', '主视觉主背景', 1),
+      opt('def-title-2', 'title', '签到处背景板', '入口签到打卡墙', 2),
+      opt('def-title-3', 'title', '易拉宝展架', '通道立式指引', 3),
+      opt('def-title-4', 'title', '导视立牌', '方向引导立牌', 4),
+      opt('def-title-5', 'title', '桌面台卡', '桌牌/席位卡', 5),
+      opt('def-title-6', 'title', '合影打卡区', '留影互动造型板', 6),
+      opt('def-title-7', 'title', '门头造型牌', '入口门头横幅', 7),
+      opt('def-title-8', 'title', '产品展示板', '展陈图文介绍板', 8),
+
+      // 材质
+      opt('def-mat-1', 'material', '喷绘布+桁架', '常规大型舞台桁架喷绘', 1),
+      opt('def-mat-2', 'material', '5mm KT板', '轻质室内短展板', 2),
+      opt('def-mat-3', 'material', '10mm 安迪板（雪弗板）', '挺括硬质展板/立体字底板', 3),
+      opt('def-mat-4', 'material', '3mm 亚克力', '高透或磨砂亚克力板', 4),
+      opt('def-mat-5', 'material', '5mm 亚克力', '加厚亚克力立牌/标牌', 5),
+      opt('def-mat-6', 'material', '黑底户外背胶', '防透底高遮盖背胶贴', 6),
+      opt('def-mat-7', 'material', 'PP合成纸', '易拉宝/海报常用哑光纸', 7),
+      opt('def-mat-8', 'material', '灯箱片', '背光灯箱专用透光片', 8),
+      opt('def-mat-9', 'material', '300g 铜版纸', '单页/台卡/吊牌印刷纸', 9),
+      opt('def-mat-10', 'material', '热转印经编布', '拉网展架/高端无折痕画面', 10),
+
+      // 工艺
+      opt('def-craft-1', 'craft', '高清UV平板直喷', '色彩还原度高、耐刮擦', 1),
+      opt('def-craft-2', 'craft', '户内写真+覆哑膜', '防反光、质感细腻', 2),
+      opt('def-craft-3', 'craft', '户内写真+覆亮膜', '高饱和度鲜艳画面', 3),
+      opt('def-craft-4', 'craft', '异形精雕模切', '按轮廓路径CNC异形切割', 4),
+      opt('def-craft-5', 'craft', '双面印刷+包边', '正反双面可视、包铝合金/PVC边', 5),
+      opt('def-craft-6', 'craft', '四周打孔+穿绳/绑扎带', '桁架/悬吊固定工艺', 6),
+      opt('def-craft-7', 'craft', '背面配支架/折叠支撑', '立式展板自支撑结构', 7),
+      opt('def-craft-8', 'craft', '激光切割+丝印', '亚克力/金属精致字牌', 8),
+
+      // 尺寸
+      opt('def-size-1', 'size', '600×300cm', '常规大型主背景', 1),
+      opt('def-size-2', 'size', '400×300cm', '标准签到背景板', 2),
+      opt('def-size-3', 'size', '80×200cm', '标准易拉宝/门型展架', 3),
+      opt('def-size-4', 'size', '60×160cm', 'X展架/小型引导架', 4),
+      opt('def-size-5', 'size', '80×180cm', '导视立牌/人形立牌', 5),
+      opt('def-size-6', 'size', '120×240cm', '整板展示墙', 6),
+      opt('def-size-7', 'size', '420×297mm (A3横)', 'A3横版桌面指示/图册', 7),
+      opt('def-size-8', 'size', '210×297mm (A4竖)', 'A4台卡/菜单牌', 8),
+      opt('def-size-9', 'size', '150×100mm', '桌面小席卡', 9),
+
+      // 数量
+      opt('def-qty-1', 'quantity', '1 块', '单块制作', 1),
+      opt('def-qty-2', 'quantity', '2 块', '成对布置', 2),
+      opt('def-qty-3', 'quantity', '4 块', '多点位分布', 3),
+      opt('def-qty-4', 'quantity', '1 套', '整套组合物料', 4),
+      opt('def-qty-5', 'quantity', '2 套', '对称两套', 5),
+      opt('def-qty-6', 'quantity', '6 个', '多通道易拉宝/立牌', 6),
+      opt('def-qty-7', 'quantity', '10 个', '批量导视', 7),
+      opt('def-qty-8', 'quantity', '20 份', '印刷品小批量', 8),
+
+      // 备注
+      opt('def-note-1', 'note', '需现场安装', '包含施工搭建与固定', 1),
+      opt('def-note-2', 'note', '含铝合金底座', '连同硬件展架一并交付', 2),
+      opt('def-note-3', 'note', '画面四周留出血5cm', '喷绘绷架留白包边', 3),
+      opt('def-note-4', 'note', '颜色按CMYK校样', '先打小样确认色差', 4),
+      opt('def-note-5', 'note', '异形裁切请保留刀线层', '注意保留矢量刀版线', 5),
+      opt('def-note-6', 'note', '双面同图', '正反两面画面一致', 6),
+      opt('def-note-7', 'note', '加急次日送达', '优先排产并现场核收', 7),
+    ],
+    defaultTemplates: [
+      tpl(
+        'def-tpl-1',
+        '主舞台背景板（桁架喷绘）',
+        '主舞台背景板',
+        '喷绘布+桁架',
+        '四周打孔+绑扎带',
+        '600×300cm',
+        '1 套',
+        '画面四周留出血5cm；需现场安装',
+        1,
+      ),
+      tpl(
+        'def-tpl-2',
+        '签到处背景板（雪弗板）',
+        '签到处背景板',
+        '10mm 安迪板（雪弗板）',
+        '高清UV平板直喷',
+        '400×300cm',
+        '1 套',
+        '需现场安装；接缝对齐',
+        2,
+      ),
+      tpl(
+        'def-tpl-3',
+        '标准易拉宝展架',
+        '易拉宝展架',
+        'PP合成纸',
+        '户内写真+覆哑膜',
+        '80×200cm',
+        '4 个',
+        '含铝合金底座',
+        3,
+      ),
+      tpl(
+        'def-tpl-4',
+        '导视立牌（异形雪弗板）',
+        '导视立牌',
+        '10mm 安迪板（雪弗板）',
+        '异形精雕模切',
+        '80×180cm',
+        '6 个',
+        '背面配支架/折叠支撑',
+        4,
+      ),
+      tpl(
+        'def-tpl-5',
+        '桌面亚克力台卡',
+        '桌面台卡',
+        '5mm 亚克力',
+        '激光切割+丝印',
+        '210×297mm (A4竖)',
+        '10 个',
+        '含U型底座',
+        5,
+      ),
+      tpl(
+        'def-tpl-6',
+        '活动吊旗（双面）',
+        '活动吊旗',
+        '黑底户外背胶',
+        '双面印刷+包边',
+        '60×160cm',
+        '8 面',
+        '顶部穿杆配挂绳',
+        6,
+      ),
+      tpl(
+        'def-tpl-7',
+        'KT板展陈板',
+        '产品展示板',
+        '5mm KT板',
+        '户内写真+覆哑膜',
+        '120×240cm',
+        '4 块',
+        '四周铝塑包边',
+        7,
+      ),
+      tpl(
+        'def-tpl-8',
+        '门型展架',
+        '门型展架',
+        'PP合成纸',
+        '户内写真+覆哑膜',
+        '80×180cm',
+        '2 个',
+        '四角打金属扣眼，含铁质门型架',
+        8,
+      ),
+    ],
+    projectData: {},
+  }
+}

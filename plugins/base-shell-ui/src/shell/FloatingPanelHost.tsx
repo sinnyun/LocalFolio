@@ -2,6 +2,7 @@ import * as React from 'react'
 import type { FloatingPanelContribution } from '@folio/base-contract'
 import { FolioIconClose } from '@folio/base-ui-kit/client'
 import { WorkspaceErrorBoundary } from './ErrorBoundary.js'
+import { createDragBoundaryHandlers } from './drag-isolation.js'
 import { useShellStore, type FloatingPanelGeometry } from './shell-store.js'
 
 type ResizeEdge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
@@ -148,6 +149,7 @@ function FloatingWindow({
         borderRadius: 'var(--dsw-radius-md, 10px)',
       }
 
+  const dragBoundaryHandlers = React.useMemo(() => createDragBoundaryHandlers(), [])
   const Content = contrib.Component
 
   return (
@@ -157,6 +159,7 @@ function FloatingWindow({
       data-lf-floating-panel={contrib.id}
       data-lf-maximized={maximized ? 'true' : 'false'}
       onPointerDown={onFocus}
+      {...dragBoundaryHandlers}
       style={{
         ...windowStyle,
         display: 'flex',

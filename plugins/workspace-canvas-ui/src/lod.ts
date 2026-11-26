@@ -152,6 +152,53 @@ export function buildSelfHostedAssetUrls() {
   })
 }
 
+export interface HostPathBridge {
+  /** Absolute harness-host path of one picked file, or empty when the shell has none for it. */
+  pathFor?(file: File): string
+}
+
+/**
+ * Resolve the real disk path of a dropped/pasted file. Electron can attach a
+ * legacy `File.path`, while the DSH Desktop preload exposes the equivalent
+ * `__DSH_HOST_PATHS__.pathFor(file)`. A served browser page has neither.
+ */
+export function resolveDroppedFilePath(file: File): string | null {
+  const legacyPath = (file as File & { path?: unknown }).path
+  if (typeof legacyPath === 'string' && legacyPath.trim().length > 0) {
+    return legacyPath.trim()
+  }
+
+  const bridge = (globalThis as { __DSH_HOST_PATHS__?: HostPathBridge }).__DSH_HOST_PATHS__
+  if (bridge && typeof bridge.pathFor === 'function') {
+    try {
+      const resolved = bridge.pathFor(file)
+      if (typeof resolved === 'string' && resolved.trim().length > 0) {
+        return resolved.trim()
+      }
+    } catch {
+      // The desktop bridge rejects synthetic files it does not own.
+    }
+  }
+  return null
+}
+
+export function isDroppedImageFile(file: File): boolean {
+  if (typeof file.type === 'string' && file.type.toLowerCase().startsWith('image/')) {
+    return true
+  }
+  return isImagePathCandidate(file.name ?? '')
+}
+
+/** Base64-encode arbitrary bytes without blowing the argument limit of `btoa`. */
+export function bytesToBase64(bytes: Uint8Array): string {
+  const step = 0x8000
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += step) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + step))
+  }
+  return btoa(binary)
+}
+
 export interface CreateFolioAssetStoreOptions {
   readonly getLinkStatus: (linkId: string) => LinkStatus
   readonly onBlockedWebUpload: (file: File) => void
@@ -159,14 +206,20 @@ export interface CreateFolioAssetStoreOptions {
     asset: TLAsset,
     localPath: string,
   ) => Promise<{ readonly src: string; readonly meta: JsonObject }>
+  readonly onWebFileImport: (
+    file: File,
+  ) => Promise<{ readonly src: string; readonly meta: JsonObject }>
 }
 
 export function createFolioAssetStore(options: CreateFolioAssetStoreOptions): TLAssetStore {
   return {
     async upload(asset, file) {
-      const localPath = (file as File & { path?: string }).path
-      if (typeof localPath === 'string' && localPath.trim().length > 0) {
+      const localPath = resolveDroppedFilePath(file)
+      if (localPath) {
         return options.onElectronFileLink(asset, localPath)
+      }
+      if (isDroppedImageFile(file)) {
+        return options.onWebFileImport(file)
       }
       options.onBlockedWebUpload(file)
       throw new Error('LocalFolio 画板不直接嵌入图片二进制，请使用文件链接导入。')

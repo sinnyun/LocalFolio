@@ -22,7 +22,9 @@ import {
   createFolioAssetStore,
   extractFolioLinkMeta,
   extractLocalPathsFromText,
+  isDroppedImageFile,
   isImagePathCandidate,
+  resolveDroppedFilePath,
 } from '../lod.js'
 import { LinkedImagesPanel } from './LinkedImagesPanel.js'
 import { LocalImagePickerDialog } from './LocalImagePickerDialog.js'
@@ -146,6 +148,8 @@ export function CanvasStage(): React.ReactElement {
     insertLinkedImages,
     pickAndInsertImages,
     linkElectronDroppedFile,
+    importWebFile,
+    importDroppedFiles,
     handleBlockedWebUpload,
   } = useCanvas()
 
@@ -168,6 +172,10 @@ export function CanvasStage(): React.ReactElement {
   getLinkStatusRef.current = getLinkStatus
   const linkElectronRef = React.useRef(linkElectronDroppedFile)
   linkElectronRef.current = linkElectronDroppedFile
+  const importWebFileRef = React.useRef(importWebFile)
+  importWebFileRef.current = importWebFile
+  const importDroppedRef = React.useRef(importDroppedFiles)
+  importDroppedRef.current = importDroppedFiles
   const blockedUploadRef = React.useRef(handleBlockedWebUpload)
   blockedUploadRef.current = handleBlockedWebUpload
 
@@ -177,6 +185,7 @@ export function CanvasStage(): React.ReactElement {
         getLinkStatus: linkId => getLinkStatusRef.current(linkId),
         onBlockedWebUpload: file => blockedUploadRef.current(file),
         onElectronFileLink: (asset, localPath) => linkElectronRef.current(asset, localPath),
+        onWebFileImport: file => importWebFileRef.current(file),
       }),
     [],
   )
@@ -256,18 +265,32 @@ export function CanvasStage(): React.ReactElement {
         const dropPoint = content.point
           ? editor.screenToPage({ x: content.point.x, y: content.point.y })
           : undefined
-        const paths = content.files
-          .map(f => (f as File & { path?: string }).path)
-          .filter((p): p is string => typeof p === 'string' && p.trim().length > 0 && isImagePathCandidate(p))
 
-        if (paths.length > 0) {
-          await insertLinkedRef.current(paths, dropPoint)
-          return
+        const linkedPaths: string[] = []
+        const importFiles: File[] = []
+        for (const file of content.files) {
+          const hostPath = resolveDroppedFilePath(file)
+          if (hostPath && isImagePathCandidate(hostPath)) {
+            linkedPaths.push(hostPath)
+            continue
+          }
+          // A served browser page never exposes a disk path; hand the bytes to the
+          // host, which stores them in its managed imports folder and returns a
+          // real path we can link like any other local image.
+          if (isDroppedImageFile(file)) {
+            importFiles.push(file)
+          }
         }
 
-        const first = content.files[0]
-        if (first) {
-          blockedUploadRef.current(first)
+        if (linkedPaths.length > 0) {
+          await insertLinkedRef.current(linkedPaths, dropPoint)
+        }
+        if (importFiles.length > 0) {
+          await importDroppedRef.current(importFiles, dropPoint)
+        }
+        if (linkedPaths.length === 0 && importFiles.length === 0) {
+          const first = content.files[0]
+          if (first) blockedUploadRef.current(first)
         }
       })
 

@@ -105,6 +105,12 @@ importers:
       '@folio/workspace-files-ui':
         specifier: link:../../plugins/workspace-files-ui
         version: link:../../plugins/workspace-files-ui
+      '@folio/workspace-materials-host':
+        specifier: link:../../plugins/workspace-materials-host
+        version: link:../../plugins/workspace-materials-host
+      '@folio/workspace-materials-ui':
+        specifier: link:../../plugins/workspace-materials-ui
+        version: link:../../plugins/workspace-materials-ui
 
   libs/base-contract:
     dependencies:
@@ -448,6 +454,38 @@ importers:
         version: 4.6.7
 
   plugins/workspace-files-ui:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.0
+        version: 4.1.0
+      react:
+        specifier: 18.3.1
+        version: 18.3.1
+    devDependencies:
+      '@folio/base-contract':
+        specifier: workspace:*
+        version: link:../../libs/base-contract
+      '@folio/base-ui-kit':
+        specifier: workspace:*
+        version: link:../base-ui-kit
+      lucide-react:
+        specifier: ^0.511.0
+        version: 0.511.0(react@18.3.1)
+
+  plugins/workspace-materials-host:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.0
+        version: 4.1.0
+    devDependencies:
+      '@folio/base-contract':
+        specifier: workspace:*
+        version: link:../../libs/base-contract
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+
+  plugins/workspace-materials-ui:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.0

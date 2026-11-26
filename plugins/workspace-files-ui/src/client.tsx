@@ -1,7 +1,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {
   FolioFrameService,
+  FolioInteractionsService,
   FrameAppDefinition,
+  FrameProviderProps,
   WorkspaceUiContribution,
 } from '@folio/base-contract'
 import { FolderOpen } from 'lucide-react'
@@ -18,7 +20,13 @@ function FilesWorkspaceIcon({ size = 14 }: { readonly size?: number }): React.Re
   return <FolderOpen size={size} strokeWidth={1.75} aria-hidden="true" />
 }
 
-export function createFilesApp(): FrameAppDefinition {
+export function createFilesApp(
+  getInteractions?: () => FolioInteractionsService | undefined,
+): FrameAppDefinition {
+  function BoundFilesProvider(props: FrameProviderProps): React.ReactElement {
+    return <FilesProvider {...props} getInteractions={getInteractions} />
+  }
+
   return {
     id: FILES_APP_ID,
     workspaceId: FILES_WORKSPACE_ID,
@@ -35,7 +43,7 @@ export function createFilesApp(): FrameAppDefinition {
       leftCollapsed: false,
       rightCollapsed: false,
     },
-    Provider: FilesProvider,
+    Provider: BoundFilesProvider,
     Left: FilesSidebar,
     Main: FilesMain,
     Right: FilesInspector,
@@ -60,7 +68,7 @@ export const inject = ['folioFrame', 'folioShell'] as const
 export function apply(ctx: Context): void {
   ctx.effect(() => {
     const frame: FolioFrameService = ctx.folioFrame
-    const disposeApp = frame.registerApp(createFilesApp())
+    const disposeApp = frame.registerApp(createFilesApp(() => ctx.get('folioInteractions')))
     const disposeWorkspace = ctx.folioShell.registerWorkspace(createFilesWorkspace(frame))
     return () => {
       disposeWorkspace()

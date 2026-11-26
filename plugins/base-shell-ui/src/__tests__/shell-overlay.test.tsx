@@ -291,6 +291,13 @@ describe('@folio/base-shell-ui (native DSH DOM + floating panels)', () => {
     expect(bar.style.left).toBe('168px')
     expect(bar.style.right).toBe('180px')
     expect(bar.style.top).toBe('0px')
+    expect(bar.style.pointerEvents).toBe('none')
+    expect((bar.style as CSSStyleDeclaration & { webkitAppRegion?: string }).webkitAppRegion).not.toBe(
+      'no-drag',
+    )
+    const captionStyles = document.querySelector('[data-lf-caption-styles]')?.textContent ?? ''
+    expect(captionStyles).toContain('pointer-events: auto')
+    expect(captionStyles).toContain('-webkit-app-region: no-drag')
     expect(bar.querySelectorAll('[data-lf-caption-tab]')).toHaveLength(2)
 
     const toggle = document.querySelector('[data-lf-caption-toggle]') as HTMLButtonElement

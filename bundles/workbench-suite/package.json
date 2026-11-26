@@ -29,9 +29,12 @@
     "@folio/base-runtime-host": "link:../../plugins/base-runtime-host",
     "@folio/base-ui-kit": "link:../../plugins/base-ui-kit",
     "@folio/base-shell-ui": "link:../../plugins/base-shell-ui",
+    "@folio/bridge-dsh-interactions-ui": "link:../../plugins/bridge-dsh-interactions-ui",
     "@folio/base-frame-ui": "link:../../plugins/base-frame-ui",
     "@folio/base-settings-ui": "link:../../plugins/base-settings-ui",
     "@folio/bridge-frame-test-ui": "link:../../plugins/bridge-frame-test-ui",
+    "@folio/workspace-canvas-host": "link:../../plugins/workspace-canvas-host",
+    "@folio/workspace-canvas-ui": "link:../../plugins/workspace-canvas-ui",
     "@folio/workspace-files-host": "link:../../plugins/workspace-files-host",
     "@folio/workspace-files-ui": "link:../../plugins/workspace-files-ui"
   },

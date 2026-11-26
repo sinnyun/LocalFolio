@@ -10,9 +10,15 @@ import {
 } from '@folio/base-contract'
 import { normalizeBrowsePath } from './classify.js'
 import { listDrives, listQuickFolders } from './drives.js'
+import { createDefaultFavoritesState, createFavoritesManager } from './favorites.js'
 import { inspectFile, listDirectory, listTreeChildren, revealInExplorer } from './fs-ops.js'
-import { createMediaRouteHandler, createThumbRouteHandler } from './media-route.js'
-import { FilesPrefsSchema } from './types.js'
+import {
+  createDownloadRouteHandler,
+  createMediaRouteHandler,
+  createThumbRouteHandler,
+} from './media-route.js'
+import { createMetadataManager } from './metadata.js'
+import { FavoritesStateSchema, FilesPrefsSchema, MetadataStateSchema } from './types.js'
 import { createWindowsShellThumbProvider, type ShellThumbProvider } from './win-thumb.js'
 
 export interface RegisterWorkspaceFilesHostOptions {
@@ -30,6 +36,19 @@ export function registerWorkspaceFilesHost(options: RegisterWorkspaceFilesHostOp
   const prefsStore = pluginStorage.jsonStore('preferences.json', FilesPrefsSchema, () => ({
     pinnedFolders: [],
   }))
+  const favoritesStore = pluginStorage.jsonStore(
+    'favorites.json',
+    FavoritesStateSchema,
+    createDefaultFavoritesState,
+  )
+  const metadataStore = pluginStorage.jsonStore('metadata.json', MetadataStateSchema, () => ({
+    version: 1 as const,
+    tags: [],
+    files: {},
+  }))
+
+  const favorites = createFavoritesManager(favoritesStore)
+  const metadata = createMetadataManager(metadataStore)
 
   const disposers = [
     runtime.registerAction(
@@ -159,8 +178,238 @@ export function registerWorkspaceFilesHost(options: RegisterWorkspaceFilesHostOp
       }),
     ),
 
+    // Favorites actions
+    runtime.registerAction(
+      defineAction({
+        id: 'files.favorites.get',
+        title: '读取文件夹收藏夹与分组',
+        tier: 'read',
+        input: z.object({}).default({}),
+        run: async () => favorites.get(),
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'files.favorites.add',
+        title: '添加文件夹到收藏夹',
+        tier: 'modify',
+        input: z.object({
+          path: z.string().min(1),
+          name: z.string().optional(),
+          groupId: z.string().optional(),
+        }),
+        run: async input => {
+          const next = await favorites.add(input)
+          runtime.events.emitInvalidate('files', input.path)
+          return next
+        },
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'files.favorites.update',
+        title: '更新收藏文件夹信息',
+        tier: 'modify',
+        input: z.object({
+          id: z.string().min(1),
+          name: z.string().optional(),
+          groupId: z.string().optional(),
+          order: z.number().int().optional(),
+        }),
+        run: async input => {
+          const next = await favorites.update(input)
+          runtime.events.emitInvalidate('files', input.id)
+          return next
+        },
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'files.favorites.remove',
+        title: '移除收藏文件夹',
+        tier: 'delete',
+        input: z.object({
+          id: z.string().optional(),
+          path: z.string().optional(),
+        }),
+        run: async input => {
+          const next = await favorites.remove(input)
+          runtime.events.emitInvalidate('files', input.id ?? input.path)
+          return next
+        },
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'files.favorites.group.create',
+        title: '创建收藏夹分组',
+        tier: 'modify',
+        input: z.object({
+          name: z.string().min(1),
+          color: z.string().optional(),
+        }),
+        run: async input => {
+          const next = await favorites.createGroup(input)
+          runtime.events.emitInvalidate('files')
+          return next
+        },
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'files.favorites.group.update',
+        title: '更新收藏夹分组',
+        tier: 'modify',
+        input: z.object({
+          id: z.string().min(1),
+          name: z.string().optional(),
+          color: z.string().optional(),
+          order: z.number().int().optional(),
+        }),
+        run: async input => {
+          const next = await favorites.updateGroup(input)
+          runtime.events.emitInvalidate('files')
+          return next
+        },
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'files.favorites.group.delete',
+        title: '删除收藏夹分组',
+        tier: 'delete',
+        input: z.object({
+          id: z.string().min(1),
+          mode: z.enum(['move-to-default', 'delete-items']).optional(),
+        }),
+        run: async input => {
+          const next = await favorites.deleteGroup(input)
+          runtime.events.emitInvalidate('files')
+          return next
+        },
+      }),
+    ),
+
+    // Metadata & Tag actions
+    runtime.registerAction(
+      defineAction({
+        id: 'files.meta.get',
+        title: '读取文件标签、星级与备注索引',
+        tier: 'read',
+        input: z.object({}).default({}),
+        run: async () => metadata.get(),
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'files.meta.set',
+        title: '设置文件星级、标签或备注',
+        tier: 'modify',
+        input: z.object({
+          path: z.string().min(1),
+          rating: z.number().int().min(0).max(5).optional(),
+          tagIds: z.array(z.string()).optional(),
+          note: z.string().optional(),
+        }),
+        run: async input => {
+          const res = await metadata.setFileMeta(input)
+          runtime.events.emitInvalidate('files', res.key)
+          return res
+        },
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'files.meta.pruneMissing',
+        title: '清理已失效的文件元数据记录',
+        tier: 'delete',
+        input: z.object({
+          paths: z.array(z.string().min(1)),
+        }),
+        run: async input => {
+          const res = await metadata.pruneMissing(input)
+          runtime.events.emitInvalidate('files')
+          return res
+        },
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'files.tags.create',
+        title: '创建文件标签',
+        tier: 'modify',
+        input: z.object({
+          name: z.string().min(1),
+          color: z.string().optional(),
+          description: z.string().optional(),
+        }),
+        run: async input => {
+          const res = await metadata.createTag(input)
+          runtime.events.emitInvalidate('files')
+          return res
+        },
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'files.tags.update',
+        title: '更新文件标签',
+        tier: 'modify',
+        input: z.object({
+          id: z.string().min(1),
+          name: z.string().optional(),
+          color: z.string().optional(),
+          description: z.string().optional(),
+        }),
+        run: async input => {
+          const res = await metadata.updateTag(input)
+          runtime.events.emitInvalidate('files')
+          return res
+        },
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'files.tags.delete',
+        title: '删除文件标签',
+        tier: 'delete',
+        input: z.object({
+          id: z.string().min(1),
+        }),
+        run: async input => {
+          const res = await metadata.deleteTag(input)
+          runtime.events.emitInvalidate('files')
+          return res
+        },
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'files.tags.files',
+        title: '聚合获取指定标签下的本地文件',
+        tier: 'read',
+        input: z.object({
+          tagId: z.string().min(1),
+        }),
+        run: async input => metadata.listTagFiles(input),
+      }),
+    ),
+
     runtime.registerRoute('GET', '/files/thumb', createThumbRouteHandler(thumbProvider)),
     runtime.registerRoute('GET', '/files/media', createMediaRouteHandler()),
+    runtime.registerRoute('GET', '/files/download', createDownloadRouteHandler()),
   ]
 
   return () => {

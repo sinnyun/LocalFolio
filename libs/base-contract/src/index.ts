@@ -5,6 +5,7 @@ export * from './shell.js'
 export * from './frame.js'
 export * from './manifest.js'
 export * from './ui-service.js'
+export * from './interactions.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -13,6 +14,7 @@ declare module '@deepseek-ai/cordis' {
     folioShell: import('./shell.js').FolioShellService
     folioFrame: import('./frame.js').FolioFrameService
     folioUi: import('./ui-service.js').FolioUiService
+    folioInteractions?: import('./interactions.js').FolioInteractionsService
     effect(execute: () => (() => void) | void, label?: string): () => void
 
     /**

@@ -4,7 +4,7 @@ import { useFiles } from '../context.js'
 import { formatBytes, groupEntries } from '../format.js'
 
 export function FilesStatus(_props: FrameViewProps): React.ReactElement {
-  const { panes, activePaneId, dualPane, selectedEntry } = useFiles()
+  const { metadata, panes, activePaneId, dualPane, selectedEntry, getFileMeta } = useFiles()
   const pane = panes[activePaneId]
 
   const visibleCount = React.useMemo(() => {
@@ -16,6 +16,10 @@ export function FilesStatus(_props: FrameViewProps): React.ReactElement {
       pane.sortDir,
       pane.filterQuery,
       pane.categoryFilter,
+      new Date(),
+      metadata.files,
+      pane.minRating,
+      pane.mode,
     )
     return groups.reduce((acc, g) => acc + g.entries.length, 0)
   }, [
@@ -26,10 +30,22 @@ export function FilesStatus(_props: FrameViewProps): React.ReactElement {
     pane.sortDir,
     pane.filterQuery,
     pane.categoryFilter,
+    metadata.files,
+    pane.minRating,
+    pane.mode,
   ])
 
+  const activeTag =
+    pane.mode === 'tag' && pane.activeTagId
+      ? metadata.tags.find(t => t.id === pane.activeTagId) ?? null
+      : null
+
   const folderLabel =
-    pane.breadcrumbs[pane.breadcrumbs.length - 1]?.name || pane.path || '加载中…'
+    pane.mode === 'tag'
+      ? `# ${activeTag?.name ?? pane.activeTagId}`
+      : pane.breadcrumbs[pane.breadcrumbs.length - 1]?.name || pane.path || '加载中…'
+
+  const selectedMeta = selectedEntry ? getFileMeta(selectedEntry.path) : null
 
   return (
     <div
@@ -46,7 +62,7 @@ export function FilesStatus(_props: FrameViewProps): React.ReactElement {
         ·
       </span>
       <span className="tabular-nums">
-        {pane.filterQuery.trim() || pane.categoryFilter !== 'all'
+        {pane.filterQuery.trim() || pane.categoryFilter !== 'all' || pane.minRating > 0
           ? `筛选 ${visibleCount} / ${pane.totalEntries} 项`
           : `共 ${pane.totalEntries} 项`}
         {pane.truncated ? '（已截断）' : ''}
@@ -59,6 +75,10 @@ export function FilesStatus(_props: FrameViewProps): React.ReactElement {
           <span className="truncate text-foreground">
             已选：{selectedEntry.name}
             {!selectedEntry.isDir ? ` (${formatBytes(selectedEntry.size)})` : ''}
+            {selectedMeta && selectedMeta.rating > 0 ? ` · ${selectedMeta.rating}★` : ''}
+            {selectedMeta && selectedMeta.tagIds.length > 0
+              ? ` · ${selectedMeta.tagIds.length} 标签`
+              : ''}
           </span>
         </>
       ) : null}

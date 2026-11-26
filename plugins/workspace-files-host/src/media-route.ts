@@ -1,11 +1,13 @@
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
+import path from 'node:path'
 import { Readable } from 'node:stream'
 import { FolioError, type FolioRouteHandler } from '@folio/base-contract'
 import { classifyFile, isStreamableMediaExt, normalizeBrowsePath } from './classify.js'
 import type { ShellThumbProvider } from './win-thumb.js'
 
 const MAX_IMAGE_STREAM_BYTES = 50 * 1024 * 1024 // 50 MB
+const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024 // 100 MB
 const THUMB_BUCKETS = [96, 160, 256, 512] as const
 
 function snapThumbBucket(rawSize: number): number {
@@ -164,5 +166,64 @@ export function createMediaRouteHandler(): FolioRouteHandler {
     const stream = fs.createReadStream(filePath)
     const webStream = Readable.toWeb(stream) as ReadableStream<Uint8Array>
     return new Response(webStream, { status: 200, headers: baseHeaders })
+  }
+}
+
+export function createDownloadRouteHandler(): FolioRouteHandler {
+  return async (request: Request): Promise<Response> => {
+    const url = new URL(request.url)
+    const rawPath = url.searchParams.get('path')
+    if (!rawPath) {
+      throw new FolioError('missing_path', '缺少 path 参数', 400)
+    }
+
+    const filePath = normalizeBrowsePath(rawPath)
+    let st: fs.Stats
+    try {
+      st = await fsp.stat(filePath)
+    } catch {
+      throw new FolioError('not_found', `文件不存在: ${filePath}`, 404)
+    }
+
+    if (!st.isFile()) {
+      throw new FolioError('not_a_file', '只能下载普通文件', 400)
+    }
+
+    if (st.size > MAX_DOWNLOAD_BYTES) {
+      throw new FolioError('payload_too_large', '文件体积超出 100MB 传输上限', 413)
+    }
+
+    const meta = classifyFile(filePath, false)
+    const etag = `"dl-${st.size}-${Math.trunc(st.mtimeMs)}"`
+    if (request.headers.get('if-none-match') === etag) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          etag,
+          'cache-control': 'private, no-store',
+        },
+      })
+    }
+
+    const fileName = path.basename(filePath) || 'file'
+    const headers: Record<string, string> = {
+      'content-type': meta.mime,
+      'content-length': String(st.size),
+      'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      etag,
+      'cache-control': 'private, no-store',
+      'x-content-type-options': 'nosniff',
+    }
+    if (meta.ext === '.svg' || meta.ext === '.html' || meta.ext === '.htm') {
+      headers['content-security-policy'] = 'sandbox'
+    }
+
+    if (request.method.toUpperCase() === 'HEAD') {
+      return new Response(null, { status: 200, headers })
+    }
+
+    const stream = fs.createReadStream(filePath)
+    const webStream = Readable.toWeb(stream) as ReadableStream<Uint8Array>
+    return new Response(webStream, { status: 200, headers })
   }
 }

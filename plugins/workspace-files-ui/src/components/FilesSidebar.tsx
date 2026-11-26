@@ -7,6 +7,7 @@ import {
   FileText,
   Film,
   Folder,
+  FolderHeart,
   FolderOpen,
   HardDrive,
   Home,
@@ -17,9 +18,17 @@ import {
   Pin,
   PinOff,
   Plus,
+  SlidersHorizontal,
+  Star,
+  Tag,
+  Trash2,
   Usb,
 } from 'lucide-react'
 import {
+  Badge,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
   SidebarContent,
   SidebarGroup,
   SidebarGroupAction,
@@ -28,6 +37,9 @@ import {
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   Skeleton,
   cn,
 } from '@folio/base-ui-kit/client'
@@ -81,8 +93,9 @@ function TreeBranch({ path, name, hasSubdirs, depth }: TreeBranchProps): React.R
     navigateActivePane,
   } = useFiles()
 
-  const activePath = panes[activePaneId].path
-  const isCurrent = activePath.toLowerCase() === path.toLowerCase()
+  const activePane = panes[activePaneId]
+  const isCurrent =
+    activePane.mode === 'directory' && activePane.path.toLowerCase() === path.toLowerCase()
   const isExpanded = treeExpanded.has(path)
   const isLoading = treeLoading.has(path)
   const children = treeChildren[path] ?? []
@@ -177,16 +190,26 @@ export function FilesSidebar(_props: FrameViewProps): React.ReactElement {
   const {
     roots,
     rootsLoading,
+    favorites,
+    metadata,
     panes,
     activePaneId,
     navigateActivePane,
+    openTagViewActivePane,
     pinFolder,
     unpinFolder,
     locateInTree,
+    addFavorite,
+    removeFavorite,
+    isFavoritePath,
+    setFavoritesManagerOpen,
+    setTagManagerOpen,
   } = useFiles()
 
   const activePane = panes[activePaneId]
-  const activePathLower = activePane.path.toLowerCase()
+  const activePathLower = activePane.mode === 'directory' ? activePane.path.toLowerCase() : ''
+  const canFavCurrent = activePane.mode === 'directory' && Boolean(activePane.path)
+  const currentIsFav = canFavCurrent && isFavoritePath(activePane.path)
 
   const treeRoots = React.useMemo(() => {
     if (!roots) return []
@@ -203,10 +226,188 @@ export function FilesSidebar(_props: FrameViewProps): React.ReactElement {
 
   return (
     <SidebarContent data-lf-files-sidebar="">
-      {/* 1. 快捷文件夹 */}
+      {/* 1. 收藏夹 */}
+      <SidebarGroup data-lf-files-favorites="">
+        <SidebarGroupLabel>收藏夹</SidebarGroupLabel>
+        <div className="absolute top-3.5 right-3 flex items-center gap-0.5 group-data-[collapsible=icon]:hidden">
+          {canFavCurrent ? (
+            <button
+              type="button"
+              data-lf-fav-add-current=""
+              aria-label={currentIsFav ? '取消收藏当前目录' : '将当前目录添加到收藏夹'}
+              title={currentIsFav ? '取消收藏当前目录' : '将当前目录添加到收藏夹'}
+              onClick={() =>
+                void (currentIsFav
+                  ? removeFavorite({ path: activePane.path })
+                  : addFavorite(activePane.path))
+              }
+              className="flex size-5 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            >
+              <Star
+                size={13}
+                className={cn(currentIsFav && 'fill-amber-400 text-amber-500')}
+              />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            data-lf-fav-manage=""
+            aria-label="管理收藏夹"
+            title="管理收藏夹"
+            onClick={() => setFavoritesManagerOpen(true)}
+            className="flex size-5 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          >
+            <SlidersHorizontal size={13} />
+          </button>
+        </div>
+
+        <SidebarMenu>
+          {favorites.items.length === 0 ? (
+            <div className="px-2 py-1 group-data-[collapsible=icon]:hidden">
+              {canFavCurrent ? (
+                <button
+                  type="button"
+                  data-lf-fav-empty-add=""
+                  onClick={() => void addFavorite(activePane.path)}
+                  className="flex w-full items-center gap-1.5 rounded-md border border-dashed border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+                >
+                  <Plus size={12} />
+                  <span>收藏当前文件夹</span>
+                </button>
+              ) : (
+                <div className="text-[11px] text-muted-foreground">暂无收藏文件夹</div>
+              )}
+            </div>
+          ) : (
+            favorites.groups.map(group => {
+              const items = favorites.items.filter(i => i.groupId === group.id)
+              if (items.length === 0 && favorites.groups.length > 1) return null
+              return (
+                <Collapsible key={group.id} asChild defaultOpen className="group/fav">
+                  <SidebarMenuItem>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuButton tooltip={group.name}>
+                        <span
+                          className="size-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: group.color }}
+                        />
+                        <span className="truncate font-medium">{group.name}</span>
+                        <Badge
+                          variant="secondary"
+                          className="ml-auto px-1.5 py-0 text-[10px] group-data-[collapsible=icon]:hidden"
+                        >
+                          {items.length}
+                        </Badge>
+                        <ChevronRight
+                          size={12}
+                          className="shrink-0 text-muted-foreground transition-transform duration-150 group-data-[state=open]/fav:rotate-90 group-data-[collapsible=icon]:hidden"
+                        />
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenuSub>
+                        {items.map(fav => {
+                          const isCurrent = activePathLower === fav.path.toLowerCase()
+                          return (
+                            <SidebarMenuSubItem key={fav.id} className="group/fav-item relative">
+                              <SidebarMenuSubButton
+                                asChild
+                                isActive={isCurrent}
+                                data-lf-favorite-item={fav.path}
+                              >
+                                <button
+                                  type="button"
+                                  title={fav.path}
+                                  onClick={() => void navigateActivePane(fav.path)}
+                                  className="w-full pr-6 text-left"
+                                >
+                                  <FolderHeart size={13} className="shrink-0 text-amber-500" />
+                                  <span className="truncate">{fav.name}</span>
+                                </button>
+                              </SidebarMenuSubButton>
+                              <button
+                                type="button"
+                                aria-label={`移除收藏 ${fav.name}`}
+                                onClick={ev => {
+                                  ev.stopPropagation()
+                                  void removeFavorite({ id: fav.id })
+                                }}
+                                className="absolute top-1.5 right-1 hidden size-4 items-center justify-center rounded text-muted-foreground hover:text-destructive group-hover/fav-item:flex"
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            </SidebarMenuSubItem>
+                          )
+                        })}
+                      </SidebarMenuSub>
+                    </CollapsibleContent>
+                  </SidebarMenuItem>
+                </Collapsible>
+              )
+            })
+          )}
+        </SidebarMenu>
+      </SidebarGroup>
+
+      {/* 2. 标签 */}
+      <SidebarGroup data-lf-files-tags="">
+        <SidebarGroupLabel>标签</SidebarGroupLabel>
+        <SidebarGroupAction
+          data-lf-tags-manage=""
+          title="打开标签管理器"
+          aria-label="打开标签管理器"
+          onClick={() => setTagManagerOpen(true)}
+        >
+          <SlidersHorizontal size={13} />
+        </SidebarGroupAction>
+        <SidebarMenu>
+          {metadata.tags.length === 0 ? (
+            <div className="px-2 py-1 group-data-[collapsible=icon]:hidden">
+              <button
+                type="button"
+                data-lf-tags-empty-manage=""
+                onClick={() => setTagManagerOpen(true)}
+                className="flex w-full items-center gap-1.5 rounded-md border border-dashed border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+              >
+                <Tag size={12} />
+                <span>管理 / 新建标签</span>
+              </button>
+            </div>
+          ) : (
+            metadata.tags.map(tag => {
+              const count = metadata.tagCounts[tag.id] ?? 0
+              const isActive = activePane.mode === 'tag' && activePane.activeTagId === tag.id
+              return (
+                <SidebarMenuItem key={tag.id}>
+                  <SidebarMenuButton
+                    isActive={isActive}
+                    tooltip={`${tag.name} (${count})`}
+                    data-lf-sidebar-tag={tag.id}
+                    onClick={() => void openTagViewActivePane(tag.id)}
+                  >
+                    <span
+                      className="size-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: tag.color }}
+                    />
+                    <span className="truncate">{tag.name}</span>
+                    <Badge
+                      variant="secondary"
+                      className="ml-auto px-1.5 py-0 text-[10px] tabular-nums group-data-[collapsible=icon]:hidden"
+                    >
+                      {count}
+                    </Badge>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )
+            })
+          )}
+        </SidebarMenu>
+      </SidebarGroup>
+
+      {/* 3. 快捷文件夹 */}
       <SidebarGroup>
         <SidebarGroupLabel>快捷文件夹</SidebarGroupLabel>
-        {activePane.path ? (
+        {canFavCurrent ? (
           <SidebarGroupAction
             title="将当前目录固定到快捷文件夹"
             aria-label="将当前目录固定到快捷文件夹"
@@ -256,14 +457,16 @@ export function FilesSidebar(_props: FrameViewProps): React.ReactElement {
         </SidebarMenu>
       </SidebarGroup>
 
-      {/* 2. 驱动器 */}
+      {/* 4. 驱动器 */}
       <SidebarGroup>
         <SidebarGroupLabel>驱动器</SidebarGroupLabel>
         <SidebarMenu>
           {(roots?.drives ?? []).map(drive => {
             const active = activePathLower === drive.path.toLowerCase()
             const usedRatio =
-              drive.totalBytes > 0 ? Math.min(100, Math.round((drive.usedBytes / drive.totalBytes) * 100)) : 0
+              drive.totalBytes > 0
+                ? Math.min(100, Math.round((drive.usedBytes / drive.totalBytes) * 100))
+                : 0
             const isTight = usedRatio >= 90
             const capacityText =
               drive.totalBytes > 0
@@ -313,10 +516,10 @@ export function FilesSidebar(_props: FrameViewProps): React.ReactElement {
         </SidebarMenu>
       </SidebarGroup>
 
-      {/* 3. 文件树 */}
+      {/* 5. 文件树 */}
       <SidebarGroup className="group-data-[collapsible=icon]:hidden">
         <SidebarGroupLabel>文件树</SidebarGroupLabel>
-        {activePane.path ? (
+        {canFavCurrent ? (
           <SidebarGroupAction
             title="在文件树中定位当前目录"
             aria-label="在文件树中定位当前目录"

@@ -2,7 +2,9 @@ import * as React from 'react'
 import type { FrameViewProps } from '@folio/base-contract'
 import { Lightbox, LightboxContent } from '@folio/base-ui-kit/client'
 import { useFiles } from '../context.js'
+import { FavoritesManagerDialog } from './FavoritesManagerDialog.js'
 import { FilePane } from './FilePane.js'
+import { TagManagerDialog } from './TagManagerDialog.js'
 
 export function FilesMain(_props: FrameViewProps): React.ReactElement {
   const { dualPane, lightbox, setLightboxOpen, setLightboxIndex } = useFiles()
@@ -16,6 +18,9 @@ export function FilesMain(_props: FrameViewProps): React.ReactElement {
           <FilePane paneId="right" />
         </>
       ) : null}
+
+      <FavoritesManagerDialog />
+      <TagManagerDialog />
 
       <Lightbox
         items={[...lightbox.items]}

@@ -19,7 +19,8 @@
       "inject": [
         "@folio/base-ui-kit",
         "@folio/base-shell-ui",
-        "@folio/base-frame-ui"
+        "@folio/base-frame-ui",
+        "@folio/bridge-dsh-interactions-ui"
       ],
       "external": [
         "@folio/base-ui-kit"

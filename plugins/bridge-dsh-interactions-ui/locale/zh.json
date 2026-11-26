@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DSH 交互桥接",
+    "description": "将 DSH 原生右键菜单（contextMenus）、原生文件拖拽（fileDrag）与文件下载/复制能力（fileActions）桥接给工作台各工作区复用，无 DSH 服务时自动退回工作台内置菜单。"
+  }
+}

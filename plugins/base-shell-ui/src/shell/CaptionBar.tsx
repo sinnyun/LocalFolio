@@ -18,6 +18,13 @@ export interface CaptionBarBridge {
 }
 
 const CAPTION_STYLES = `
+[data-lf-caption-bar] button,
+[data-lf-caption-bar] [role='button'],
+[data-lf-caption-bar] a,
+[data-lf-caption-bar] input {
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
 [data-lf-caption-bar] button {
   appearance: none;
   display: inline-flex;
@@ -34,7 +41,6 @@ const CAPTION_STYLES = `
   line-height: 1;
   white-space: nowrap;
   cursor: default;
-  -webkit-app-region: no-drag;
 }
 [data-lf-caption-bar] button:hover {
   background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));
@@ -147,9 +153,9 @@ export function CaptionBar({ bridge }: { readonly bridge: CaptionBarBridge }): R
         zIndex: 30,
         paddingLeft: 2,
         overflow: 'hidden',
+        pointerEvents: 'none',
         fontFamily: 'var(--dsw-font-family, inherit)',
         color: 'var(--dsw-alias-label-secondary, #4b5057)',
-        ...({ WebkitAppRegion: 'no-drag' } as React.CSSProperties),
       }}
     >
       <style data-lf-caption-styles="">{CAPTION_STYLES}</style>

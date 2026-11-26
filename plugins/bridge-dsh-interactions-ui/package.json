@@ -1,0 +1,44 @@
+{
+  "name": "@folio/bridge-dsh-interactions-ui",
+  "version": "0.3.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "description": "Base bridge plugin adapting DSH native contextMenus, fileDrag, and fileActions into LocalFolio's ctx.folioInteractions service with clean fallbacks.",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@folio/base-ui-kit",
+        "@folio/base-shell-ui"
+      ],
+      "external": [
+        "@folio/base-ui-kit"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "locale",
+    "icon.svg"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.0",
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@folio/base-contract": "workspace:*",
+    "@folio/base-ui-kit": "workspace:*"
+  },
+  "engines": {
+    "dsh": "^0.2.2-rc.5"
+  }
+}

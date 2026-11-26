@@ -4,10 +4,22 @@ import type {
   FileCategory,
   FileEntry,
   FileGroup,
+  FileMetaRecord,
   GroupBy,
   SortBy,
   SortDir,
 } from './types.js'
+
+export const TAG_COLOR_PALETTE = [
+  '#3b82f6',
+  '#10b981',
+  '#f59e0b',
+  '#ef4444',
+  '#8b5cf6',
+  '#ec4899',
+  '#06b6d4',
+  '#64748b',
+] as const
 
 const CATEGORY_LABELS: Readonly<Record<FileCategory, string>> = {
   folder: '文件夹',
@@ -30,6 +42,33 @@ const CATEGORY_ORDER: readonly FileCategory[] = [
   'archive',
   'other',
 ]
+
+export function toPathKey(filePath: string): string {
+  const trimmed = filePath.trim()
+  if (!trimmed) return ''
+  return trimmed.replace(/[/\\]+$/, (m, offset) => (offset <= 2 ? m : '')).toLowerCase()
+}
+
+export function getParentDirLabel(filePath: string): {
+  readonly parentPath: string
+  readonly parentName: string
+} {
+  const normalized = filePath.trim()
+  const sepIdx = Math.max(normalized.lastIndexOf('\\'), normalized.lastIndexOf('/'))
+  if (sepIdx <= 0) {
+    return { parentPath: normalized, parentName: normalized || '根目录' }
+  }
+  let parentPath = normalized.slice(0, sepIdx)
+  if (/^[a-zA-Z]:$/.test(parentPath)) {
+    parentPath = `${parentPath}\\`
+  }
+  const parentSep = Math.max(parentPath.lastIndexOf('\\'), parentPath.lastIndexOf('/'))
+  const parentName =
+    parentSep >= 0 && parentPath.slice(parentSep + 1)
+      ? parentPath.slice(parentSep + 1)
+      : parentPath
+  return { parentPath, parentName }
+}
 
 export function categoryLabel(category: FileCategory): string {
   return CATEGORY_LABELS[category]
@@ -72,10 +111,16 @@ export function buildMediaUrl(entry: FileEntry): string {
   return `/lf/files/media?path=${encodeURIComponent(entry.path)}&v=${Math.trunc(entry.mtimeMs)}`
 }
 
+export function buildDownloadUrl(entry: FileEntry): string {
+  return `/lf/files/download?path=${encodeURIComponent(entry.path)}&v=${Math.trunc(entry.mtimeMs)}`
+}
+
 export function filterEntries(
   entries: readonly FileEntry[],
   query: string,
   categoryFilter: CategoryFilter,
+  metadataMap?: Readonly<Record<string, FileMetaRecord>>,
+  minRating = 0,
 ): FileEntry[] {
   const q = query.trim().toLowerCase()
   return entries.filter(entry => {
@@ -84,6 +129,10 @@ export function filterEntries(
     }
     if (q && !entry.name.toLowerCase().includes(q)) {
       return false
+    }
+    if (minRating > 0) {
+      const rating = metadataMap?.[toPathKey(entry.path)]?.rating ?? 0
+      if (rating < minRating) return false
     }
     return true
   })
@@ -94,6 +143,7 @@ export function sortEntries(
   sortBy: SortBy,
   sortDir: SortDir,
   foldersFirst = true,
+  metadataMap?: Readonly<Record<string, FileMetaRecord>>,
 ): FileEntry[] {
   const dirFactor = sortDir === 'asc' ? 1 : -1
   return [...entries].sort((a, b) => {
@@ -109,6 +159,10 @@ export function sortEntries(
       cmp = a.size - b.size
     } else if (sortBy === 'type') {
       cmp = a.category.localeCompare(b.category) || a.ext.localeCompare(b.ext)
+    } else if (sortBy === 'rating') {
+      const ra = metadataMap?.[toPathKey(a.path)]?.rating ?? 0
+      const rb = metadataMap?.[toPathKey(b.path)]?.rating ?? 0
+      cmp = ra - rb
     }
     if (cmp !== 0) return cmp * dirFactor
     return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
@@ -147,20 +201,55 @@ export function groupEntries(
   filterQuery: string,
   categoryFilter: CategoryFilter,
   now = new Date(),
+  metadataMap?: Readonly<Record<string, FileMetaRecord>>,
+  minRating = 0,
+  mode: 'directory' | 'tag' = 'directory',
 ): FileGroup[] {
-  const hasFilter = Boolean(filterQuery.trim()) || categoryFilter !== 'all'
+  const hasFilter = Boolean(filterQuery.trim()) || categoryFilter !== 'all' || minRating > 0
 
   if (groupBy === 'parent') {
+    if (mode === 'tag') {
+      const filtered = filterEntries(entries, filterQuery, categoryFilter, metadataMap, minRating)
+      const byParent = new Map<string, { folderName: string; folderPath: string; items: FileEntry[] }>()
+      for (const entry of filtered) {
+        const { parentPath, parentName } = getParentDirLabel(entry.path)
+        const key = parentPath.toLowerCase()
+        const existing = byParent.get(key)
+        if (existing) {
+          existing.items.push(entry)
+        } else {
+          byParent.set(key, { folderName: parentName, folderPath: parentPath, items: [entry] })
+        }
+      }
+      return Array.from(byParent.values())
+        .sort((a, b) => a.folderName.localeCompare(b.folderName, undefined, { numeric: true }))
+        .map(g => {
+          const sorted = sortEntries(g.items, sortBy, sortDir, true, metadataMap)
+          return {
+            key: `parent:${g.folderPath}`,
+            title: g.folderName,
+            folderPath: g.folderPath,
+            entries: sorted,
+            totalCount: sorted.length,
+            truncated: false,
+            isSubfolder: true,
+          }
+        })
+    }
+
     const groups: FileGroup[] = []
     const directFiles = sortEntries(
       filterEntries(
         entries.filter(entry => !entry.isDir),
         filterQuery,
         categoryFilter,
+        metadataMap,
+        minRating,
       ),
       sortBy,
       sortDir,
       false,
+      metadataMap,
     )
     if (directFiles.length > 0) {
       groups.push({
@@ -175,10 +264,11 @@ export function groupEntries(
 
     for (const cg of childGroups) {
       const matched = sortEntries(
-        filterEntries(cg.entries, filterQuery, categoryFilter),
+        filterEntries(cg.entries, filterQuery, categoryFilter, metadataMap, minRating),
         sortBy,
         sortDir,
         true,
+        metadataMap,
       )
       if (hasFilter && matched.length === 0) continue
       groups.push({
@@ -194,11 +284,11 @@ export function groupEntries(
     return groups
   }
 
-  const filtered = filterEntries(entries, filterQuery, categoryFilter)
+  const filtered = filterEntries(entries, filterQuery, categoryFilter, metadataMap, minRating)
   if (filtered.length === 0) return []
 
   if (groupBy === 'none') {
-    const sorted = sortEntries(filtered, sortBy, sortDir, true)
+    const sorted = sortEntries(filtered, sortBy, sortDir, true, metadataMap)
     return [
       {
         key: 'all',
@@ -222,7 +312,7 @@ export function groupEntries(
     for (const cat of CATEGORY_ORDER) {
       const list = buckets.get(cat)
       if (!list || list.length === 0) continue
-      const sorted = sortEntries(list, sortBy, sortDir, false)
+      const sorted = sortEntries(list, sortBy, sortDir, false, metadataMap)
       groups.push({
         key: `type:${cat}`,
         title: categoryLabel(cat),
@@ -249,7 +339,7 @@ export function groupEntries(
     return Array.from(map.entries())
       .sort((a, b) => a[1].order - b[1].order)
       .map(([key, bucket]) => {
-        const sorted = sortEntries(bucket.items, sortBy, sortDir, true)
+        const sorted = sortEntries(bucket.items, sortBy, sortDir, true, metadataMap)
         return {
           key: `time:${key}`,
           title: bucket.title,
@@ -275,7 +365,7 @@ export function groupEntries(
   return Array.from(map.entries())
     .sort((a, b) => a[1].order - b[1].order)
     .map(([key, bucket]) => {
-      const sorted = sortEntries(bucket.items, sortBy, sortDir, true)
+      const sorted = sortEntries(bucket.items, sortBy, sortDir, true, metadataMap)
       return {
         key: `name:${key}`,
         title: bucket.title,

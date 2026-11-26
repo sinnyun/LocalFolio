@@ -45,7 +45,7 @@ function mapFsError(error: unknown, targetPath: string): FolioError {
   return new FolioError('fs_error', `文件系统访问失败: ${msg}`, 500)
 }
 
-async function buildFileEntry(
+export async function buildFileEntry(
   fullPath: string,
   name: string,
   dirent?: fs.Dirent,

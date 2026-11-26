@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Canvas",
+    "description": "Infinite canvas workspace powered by tldraw: collapsible board list on the left, full tldraw canvas on the right, link-only local image references, stepped LOD proxy loading for large images, and a floating relink mini-panel.",
+    "detail": "docs/DETAIL.md"
+  }
+}

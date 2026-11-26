@@ -1,0 +1,32 @@
+{
+  "name": "@folio/workspace-canvas-host",
+  "version": "0.3.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH host plugin for LocalFolio Canvas workspace: board persistence, link-only image inspection/relinking, WIC+Shell LOD image proxy with disk cache, native file/folder dialogs, and self-hosted @tldraw/assets.",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "lib",
+    "locale",
+    "icon.svg"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.0"
+  },
+  "dependencies": {
+    "@tldraw/assets": "5.6.2"
+  },
+  "devDependencies": {
+    "@folio/base-contract": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "engines": {
+    "dsh": "^0.2.2-rc.5"
+  }
+}

@@ -25,6 +25,8 @@ export const ROW_ACTION_STYLES = `
   line-height: 1;
   white-space: nowrap;
   cursor: default;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
 }
 [data-lf-row-actions] button:hover {
   background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));

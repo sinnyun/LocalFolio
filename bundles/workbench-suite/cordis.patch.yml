@@ -12,6 +12,8 @@
       name: '@folio/base-ui-kit'
     - id: base-shell-ui
       name: '@folio/base-shell-ui'
+    - id: bridge-dsh-interactions-ui
+      name: '@folio/bridge-dsh-interactions-ui'
     - id: base-frame-ui
       name: '@folio/base-frame-ui'
     - id: base-settings-ui
@@ -22,3 +24,7 @@
       name: '@folio/workspace-files-host'
     - id: workspace-files-ui
       name: '@folio/workspace-files-ui'
+    - id: workspace-canvas-host
+      name: '@folio/workspace-canvas-host'
+    - id: workspace-canvas-ui
+      name: '@folio/workspace-canvas-ui'

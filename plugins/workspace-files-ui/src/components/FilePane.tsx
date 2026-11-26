@@ -1,5 +1,6 @@
 import * as React from 'react'
 import {
+  AlertTriangle,
   ArrowDownNarrowWide,
   ArrowLeft,
   ArrowRight,
@@ -16,6 +17,8 @@ import {
   Pencil,
   RefreshCw,
   Search,
+  Star,
+  StickyNote,
   X,
 } from 'lucide-react'
 import {
@@ -44,17 +47,22 @@ import {
 } from '@folio/base-ui-kit/client'
 import { useFiles } from '../context.js'
 import {
+  buildDownloadUrl,
   categoryLabel,
   formatBytes,
   formatDateTime,
+  getParentDirLabel,
   groupEntries,
+  toPathKey,
 } from '../format.js'
+import type { FolioFileDragSession } from '@folio/base-contract'
 import type {
   CategoryFilter,
   FileEntry,
   GroupBy,
   PaneId,
   SortBy,
+  TagDef,
 } from '../types.js'
 import { FileThumbnail } from './FileIcon.js'
 
@@ -64,6 +72,8 @@ export interface FilePaneProps {
 
 export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
   const {
+    interactions,
+    metadata,
     panes,
     activePaneId,
     dualPane,
@@ -80,10 +90,25 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
     setShowHidden,
     selectEntry,
     openLightboxForEntry,
+    isFavoritePath,
+    addFavorite,
+    removeFavorite,
+    setTagManagerOpen,
+    pruneMissingTaggedFiles,
   } = useFiles()
 
   const pane = panes[paneId]
   const isActive = activePaneId === paneId
+  const activeTag =
+    pane.mode === 'tag' && pane.activeTagId
+      ? metadata.tags.find(t => t.id === pane.activeTagId) ?? null
+      : null
+
+  const tagById = React.useMemo(() => {
+    const map = new Map<string, TagDef>()
+    for (const t of metadata.tags) map.set(t.id, t)
+    return map
+  }, [metadata.tags])
 
   const [editingPath, setEditingPath] = React.useState(false)
   const [pathDraft, setPathDraft] = React.useState(pane.path)
@@ -115,6 +140,10 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
         pane.sortDir,
         pane.filterQuery,
         pane.categoryFilter,
+        new Date(),
+        metadata.files,
+        pane.minRating,
+        pane.mode,
       ),
     [
       pane.entries,
@@ -124,13 +153,18 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
       pane.sortDir,
       pane.filterQuery,
       pane.categoryFilter,
+      metadata.files,
+      pane.minRating,
+      pane.mode,
     ],
   )
 
   const canGoBack = pane.historyIndex > 0
   const canGoForward = pane.historyIndex < pane.history.length - 1
-  const canGoUp = Boolean(pane.parentPath)
-  const hasFilter = Boolean(pane.filterQuery.trim()) || pane.categoryFilter !== 'all'
+  const canGoUp = pane.mode === 'tag' || Boolean(pane.parentPath)
+  const hasFilter =
+    Boolean(pane.filterQuery.trim()) || pane.categoryFilter !== 'all' || pane.minRating > 0
+  const isCurrentFav = pane.mode === 'directory' && Boolean(pane.path) && isFavoritePath(pane.path)
 
   const startPathEdit = (): void => {
     setPathDraft(pane.path)
@@ -140,7 +174,7 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
   const submitPathEdit = (): void => {
     const trimmed = pathDraft.trim()
     setEditingPath(false)
-    if (trimmed && trimmed !== pane.path) {
+    if (trimmed && (pane.mode === 'tag' || trimmed !== pane.path)) {
       void navigatePane(paneId, trimmed)
     }
   }
@@ -160,6 +194,84 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
     } else if (entry.category === 'image') {
       openLightboxForEntry(paneId, entry)
     }
+  }
+
+  const dragSessionsRef = React.useRef<Map<string, FolioFileDragSession>>(new Map())
+
+  React.useEffect(() => {
+    return () => {
+      for (const session of dragSessionsRef.current.values()) {
+        session.dispose()
+      }
+      dragSessionsRef.current.clear()
+    }
+  }, [])
+
+  const handleEntryPointerDown = (
+    entry: FileEntry,
+    event: React.PointerEvent<HTMLButtonElement>,
+  ): void => {
+    if (event.button !== 0 || entry.isDir || !interactions) return
+    const prev = dragSessionsRef.current.get(entry.path)
+    if (prev) prev.dispose()
+    const session = interactions.createFileDragSession(
+      {
+        kind: 'url',
+        url: buildDownloadUrl(entry),
+        name: entry.name,
+        mediaType: entry.mime,
+      },
+      { paths: [entry.path], sourceWorkspace: 'files' },
+    )
+    dragSessionsRef.current.set(entry.path, session)
+    session.prepare()
+  }
+
+  const handleEntryDragStart = (
+    entry: FileEntry,
+    event: React.DragEvent<HTMLButtonElement>,
+  ): void => {
+    if (entry.isDir || !interactions || !event.dataTransfer) return
+    let session = dragSessionsRef.current.get(entry.path)
+    if (!session) {
+      session = interactions.createFileDragSession(
+        {
+          kind: 'url',
+          url: buildDownloadUrl(entry),
+          name: entry.name,
+          mediaType: entry.mime,
+        },
+        { paths: [entry.path], sourceWorkspace: 'files' },
+      )
+      dragSessionsRef.current.set(entry.path, session)
+    }
+    const continueBrowserDrag = session.start(event.dataTransfer, event.currentTarget)
+    if (!continueBrowserDrag) {
+      // Electron Desktop native drag took over; cancel browser drag so OS drag proceeds.
+      event.preventDefault()
+    }
+  }
+
+  const handleEntryDragEnd = (entry: FileEntry): void => {
+    const session = dragSessionsRef.current.get(entry.path)
+    if (session) {
+      session.release()
+      dragSessionsRef.current.delete(entry.path)
+    }
+  }
+
+  const handleEntryContextMenu = (
+    entry: FileEntry,
+    event: React.MouseEvent<HTMLButtonElement>,
+  ): void => {
+    if (!interactions) return
+    event.preventDefault()
+    event.stopPropagation()
+    selectEntry(paneId, entry)
+    interactions.openContextMenu(
+      { kind: 'folio.files.entry', value: { paneId, path: entry.path } },
+      { x: event.clientX, y: event.clientY },
+    )
   }
 
   const handlePaneKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
@@ -198,6 +310,53 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
 
   const breadcrumbsCollapsed = pane.breadcrumbs.length > 5
 
+  const renderEntryMetaBadges = (entry: FileEntry, compact = false) => {
+    const meta = metadata.files[toPathKey(entry.path)]
+    if (!meta) return null
+    const entryTags = meta.tagIds
+      .map(id => tagById.get(id))
+      .filter((t): t is TagDef => Boolean(t))
+
+    if (meta.rating === 0 && entryTags.length === 0 && !meta.note.trim()) {
+      return null
+    }
+
+    return (
+      <div className="flex flex-wrap items-center gap-1">
+        {meta.rating > 0 ? (
+          <span
+            data-lf-entry-rating={String(meta.rating)}
+            className="inline-flex items-center gap-0.5 rounded bg-amber-500/15 px-1 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+          >
+            <Star size={9} className="fill-current" />
+            <span>{meta.rating}</span>
+          </span>
+        ) : null}
+        {entryTags.slice(0, compact ? 2 : 3).map(tag => (
+          <span
+            key={tag.id}
+            data-lf-entry-tag={tag.id}
+            title={tag.name}
+            className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/60 px-1.5 py-0.5 text-[10px] text-foreground"
+          >
+            <span className="size-1.5 rounded-full" style={{ backgroundColor: tag.color }} />
+            <span className="max-w-16 truncate">{tag.name}</span>
+          </span>
+        ))}
+        {entryTags.length > (compact ? 2 : 3) ? (
+          <span className="text-[10px] text-muted-foreground">
+            +{entryTags.length - (compact ? 2 : 3)}
+          </span>
+        ) : null}
+        {meta.note.trim() ? (
+          <span title={meta.note} className="inline-flex text-muted-foreground">
+            <StickyNote size={10} />
+          </span>
+        ) : null}
+      </div>
+    )
+  }
+
   return (
     <section
       data-lf-files-pane={paneId}
@@ -212,7 +371,7 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
         dualPane && isActive && 'ring-1 ring-inset ring-primary/35',
       )}
     >
-      {/* Row 1: 导航按钮 + 面包屑 / 可编辑地址栏 + 双栏切换 */}
+      {/* Row 1: 导航按钮 + 面包屑 / 标签聚合头 + 双栏切换 */}
       <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-border bg-background px-2">
         <div className="flex shrink-0 items-center gap-0.5">
           <Button
@@ -241,8 +400,8 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
             variant="ghost"
             size="icon-xs"
             data-lf-files-up={paneId}
-            aria-label="上一级"
-            title="上一级 (Alt+↑)"
+            aria-label={pane.mode === 'tag' ? '返回目录' : '上一级'}
+            title={pane.mode === 'tag' ? '返回目录' : '上一级 (Alt+↑)'}
             disabled={!canGoUp}
             onClick={() => void goUp(paneId)}
           >
@@ -260,7 +419,7 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
           </Button>
         </div>
 
-        {/* 面包屑导航 / 可编辑输入 */}
+        {/* 面包屑导航 / 标签聚合头 / 可编辑输入 */}
         <div className="flex min-w-0 flex-1 items-center">
           {editingPath ? (
             <form
@@ -287,6 +446,48 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
                 className="h-7 font-mono text-xs"
               />
             </form>
+          ) : pane.mode === 'tag' ? (
+            <div
+              data-lf-pane-tag-header={paneId}
+              className="flex h-7 min-w-0 flex-1 items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-2 text-xs"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                {activeTag ? (
+                  <span
+                    className="size-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: activeTag.color }}
+                  />
+                ) : null}
+                <span className="truncate font-semibold">
+                  标签聚合：{activeTag?.name ?? pane.activeTagId}
+                </span>
+                <Badge variant="secondary" className="px-1.5 py-0 text-[10px] tabular-nums">
+                  {pane.totalEntries}
+                </Badge>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setTagManagerOpen(true)}
+                  className="h-6 px-1.5 text-[11px]"
+                >
+                  管理标签
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  data-lf-files-edit-path={paneId}
+                  aria-label="输入目录路径"
+                  title="输入目录路径 (Ctrl+L)"
+                  onClick={startPathEdit}
+                >
+                  <Pencil size={12} />
+                </Button>
+              </div>
+            </div>
           ) : (
             <div
               data-lf-files-breadcrumbs={paneId}
@@ -296,7 +497,7 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
               }}
               className="flex h-7 min-w-0 flex-1 cursor-text items-center justify-between gap-1 rounded-md border border-border bg-muted/30 px-2 hover:border-ring/50"
             >
-              <div className="min-w-0 flex-1 overflow-x-auto no-scrollbar">
+              <div className="no-scrollbar min-w-0 flex-1 overflow-x-auto">
                 <Breadcrumb>
                   <BreadcrumbList className="flex-nowrap gap-1 text-xs sm:gap-1">
                     {visibleBreadcrumbs.map((crumb, idx) => {
@@ -339,20 +540,43 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
                   </BreadcrumbList>
                 </Breadcrumb>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                data-lf-files-edit-path={paneId}
-                aria-label="编辑路径"
-                title="编辑路径 (Ctrl+L)"
-                onClick={ev => {
-                  ev.stopPropagation()
-                  startPathEdit()
-                }}
-              >
-                <Pencil size={12} />
-              </Button>
+              <div className="flex shrink-0 items-center gap-0.5">
+                {pane.path ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    data-lf-pane-fav-toggle={paneId}
+                    aria-label={isCurrentFav ? '取消收藏当前目录' : '收藏当前目录'}
+                    title={isCurrentFav ? '已收藏，点击取消收藏' : '收藏当前目录'}
+                    onClick={ev => {
+                      ev.stopPropagation()
+                      void (isCurrentFav
+                        ? removeFavorite({ path: pane.path })
+                        : addFavorite(pane.path))
+                    }}
+                  >
+                    <Star
+                      size={12}
+                      className={cn(isCurrentFav && 'fill-amber-400 text-amber-500')}
+                    />
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  data-lf-files-edit-path={paneId}
+                  aria-label="编辑路径"
+                  title="编辑路径 (Ctrl+L)"
+                  onClick={ev => {
+                    ev.stopPropagation()
+                    startPathEdit()
+                  }}
+                >
+                  <Pencil size={12} />
+                </Button>
+              </div>
             </div>
           )}
         </div>
@@ -385,12 +609,11 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
         )}
       </div>
 
-      {/* Row 2: 筛选 + 视图切换 + 网格大小 + 分组 + 排序 */}
+      {/* Row 2: 筛选 + 星级筛选 + 视图切换 + 网格大小 + 分组 + 排序 */}
       <div className="flex flex-wrap items-center gap-1.5 border-b border-border bg-muted/20 px-2 py-1.5">
-        {/* 搜索筛选 */}
         <div
           ref={filterContainerRef}
-          className="relative flex min-w-36 flex-1 items-center sm:max-w-56"
+          className="relative flex min-w-32 flex-1 items-center sm:max-w-52"
         >
           <Search
             size={13}
@@ -416,7 +639,6 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
           ) : null}
         </div>
 
-        {/* 类型筛选 */}
         <Select
           value={pane.categoryFilter}
           onValueChange={val => updatePane(paneId, { categoryFilter: val as CategoryFilter })}
@@ -442,7 +664,28 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
           </SelectContent>
         </Select>
 
-        {/* 分组方式 */}
+        {/* 星级筛选 */}
+        <Select
+          value={String(pane.minRating)}
+          onValueChange={val => updatePane(paneId, { minRating: Number(val) })}
+        >
+          <SelectTrigger
+            size="sm"
+            data-lf-files-rating-filter={paneId}
+            aria-label="按星级筛选"
+            className="h-7 w-24 px-2 text-xs"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="pointer-events-auto">
+            <SelectItem value="0">全部星级</SelectItem>
+            <SelectItem value="1">≥ 1 ★</SelectItem>
+            <SelectItem value="3">≥ 3 ★</SelectItem>
+            <SelectItem value="4">≥ 4 ★</SelectItem>
+            <SelectItem value="5">仅 5 ★</SelectItem>
+          </SelectContent>
+        </Select>
+
         <Select value={pane.groupBy} onValueChange={val => void setGroupBy(paneId, val as GroupBy)}>
           <SelectTrigger
             size="sm"
@@ -461,7 +704,6 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
           </SelectContent>
         </Select>
 
-        {/* 排序字段 + 方向 */}
         <div className="flex items-center gap-0.5">
           <Select
             value={pane.sortBy}
@@ -480,6 +722,7 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
               <SelectItem value="mtime">修改时间</SelectItem>
               <SelectItem value="size">文件大小</SelectItem>
               <SelectItem value="type">文件类型</SelectItem>
+              <SelectItem value="rating">按星级</SelectItem>
             </SelectContent>
           </Select>
           <Button
@@ -500,7 +743,6 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
           </Button>
         </div>
 
-        {/* 视图切换 + 网格大小 + 隐藏文件 */}
         <div className="ml-auto flex items-center gap-1.5">
           {pane.viewMode === 'grid' ? (
             <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-0.5">
@@ -557,17 +799,19 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
             </button>
           </div>
 
-          <Button
-            variant={pane.showHidden ? 'secondary' : 'ghost'}
-            size="icon-xs"
-            data-lf-files-hidden-toggle={paneId}
-            aria-label={pane.showHidden ? '隐藏点文件' : '显示隐藏文件'}
-            aria-pressed={pane.showHidden}
-            title={pane.showHidden ? '已显示隐藏文件' : '已隐藏点文件'}
-            onClick={() => void setShowHidden(paneId, !pane.showHidden)}
-          >
-            {pane.showHidden ? <Eye size={13} /> : <EyeOff size={13} />}
-          </Button>
+          {pane.mode === 'directory' ? (
+            <Button
+              variant={pane.showHidden ? 'secondary' : 'ghost'}
+              size="icon-xs"
+              data-lf-files-hidden-toggle={paneId}
+              aria-label={pane.showHidden ? '隐藏点文件' : '显示隐藏文件'}
+              aria-pressed={pane.showHidden}
+              title={pane.showHidden ? '已显示隐藏文件' : '已隐藏点文件'}
+              onClick={() => void setShowHidden(paneId, !pane.showHidden)}
+            >
+              {pane.showHidden ? <Eye size={13} /> : <EyeOff size={13} />}
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -581,6 +825,22 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
             <span className="truncate">{pane.error}</span>
             <Button variant="outline" size="xs" onClick={() => void refreshPane(paneId)}>
               重试
+            </Button>
+          </div>
+        ) : null}
+
+        {pane.mode === 'tag' && pane.missingPaths.length > 0 ? (
+          <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={14} className="shrink-0" />
+              <span>有 {pane.missingPaths.length} 个带该标签的文件在磁盘上已移动或删除</span>
+            </div>
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={() => void pruneMissingTaggedFiles(paneId)}
+            >
+              清理失效记录
             </Button>
           </div>
         ) : null}
@@ -606,12 +866,18 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
                 <FolderOpen size={22} />
               </EmptyMedia>
               <EmptyTitle className="text-base">
-                {hasFilter ? '没有匹配的文件' : '此文件夹为空'}
+                {hasFilter
+                  ? '没有匹配的文件'
+                  : pane.mode === 'tag'
+                    ? '该标签下暂无文件'
+                    : '此文件夹为空'}
               </EmptyTitle>
               <EmptyDescription className="text-xs">
                 {hasFilter
-                  ? '尝试修改筛选关键词或切换类型条件。'
-                  : '当前目录下没有任何文件或子文件夹。'}
+                  ? '尝试修改筛选关键词、星级或类型条件。'
+                  : pane.mode === 'tag'
+                    ? '选中任意文件并在右侧检查器中添加该标签后，文件会聚合显示在这里。'
+                    : '当前目录下没有任何文件或子文件夹。'}
               </EmptyDescription>
             </EmptyHeader>
             {hasFilter ? (
@@ -620,7 +886,7 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
                   variant="outline"
                   size="sm"
                   onClick={() =>
-                    updatePane(paneId, { filterQuery: '', categoryFilter: 'all' })
+                    updatePane(paneId, { filterQuery: '', categoryFilter: 'all', minRating: 0 })
                   }
                 >
                   清除筛选条件
@@ -684,14 +950,21 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
                       {group.entries.map(entry => {
                         const selected = pane.selectedPath === entry.path
                         const thumbHeight = Math.max(72, Math.round(pane.gridSize * 0.72))
+                        const parentInfo =
+                          pane.mode === 'tag' ? getParentDirLabel(entry.path) : null
                         return (
                           <button
                             key={entry.path}
                             type="button"
+                            draggable={!entry.isDir}
                             data-lf-file-item={entry.path}
                             data-selected={selected ? 'true' : undefined}
                             onClick={() => selectEntry(paneId, entry)}
                             onDoubleClick={() => handleEntryOpen(entry)}
+                            onPointerDown={ev => handleEntryPointerDown(entry, ev)}
+                            onDragStart={ev => handleEntryDragStart(entry, ev)}
+                            onDragEnd={() => handleEntryDragEnd(entry)}
+                            onContextMenu={ev => handleEntryContextMenu(entry, ev)}
                             className={cn(
                               'group flex flex-col gap-1.5 rounded-lg border border-transparent bg-card/50 p-2 text-left transition-colors hover:border-border hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                               selected && 'border-primary/60 bg-accent ring-1 ring-primary/40',
@@ -704,15 +977,18 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
                                 className="h-full w-full"
                               />
                             </div>
-                            <div className="min-w-0 space-y-0.5">
+                            <div className="min-w-0 space-y-1">
                               <div className="line-clamp-2 break-all text-xs font-medium leading-snug text-foreground">
                                 {entry.name}
                               </div>
                               <div className="truncate text-[10px] tabular-nums text-muted-foreground">
-                                {entry.isDir
-                                  ? '文件夹'
-                                  : `${formatBytes(entry.size)} · ${categoryLabel(entry.category)}`}
+                                {parentInfo
+                                  ? `${parentInfo.parentName} · ${entry.isDir ? '文件夹' : formatBytes(entry.size)}`
+                                  : entry.isDir
+                                    ? '文件夹'
+                                    : `${formatBytes(entry.size)} · ${categoryLabel(entry.category)}`}
                               </div>
+                              {renderEntryMetaBadges(entry)}
                             </div>
                           </button>
                         )
@@ -723,8 +999,9 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
                       data-lf-files-list={paneId}
                       className="overflow-hidden rounded-lg border border-border"
                     >
-                      <div className="grid grid-cols-[1fr_76px_88px_132px] items-center gap-2 border-b border-border bg-muted/40 px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
+                      <div className="grid grid-cols-[1fr_140px_76px_88px_132px] items-center gap-2 border-b border-border bg-muted/40 px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
                         <span>名称</span>
+                        <span>标记</span>
                         <span>类型</span>
                         <span className="text-right">大小</span>
                         <span className="text-right">修改时间</span>
@@ -736,12 +1013,17 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
                             <button
                               key={entry.path}
                               type="button"
+                              draggable={!entry.isDir}
                               data-lf-file-item={entry.path}
                               data-selected={selected ? 'true' : undefined}
                               onClick={() => selectEntry(paneId, entry)}
                               onDoubleClick={() => handleEntryOpen(entry)}
+                              onPointerDown={ev => handleEntryPointerDown(entry, ev)}
+                              onDragStart={ev => handleEntryDragStart(entry, ev)}
+                              onDragEnd={() => handleEntryDragEnd(entry)}
+                              onContextMenu={ev => handleEntryContextMenu(entry, ev)}
                               className={cn(
-                                'grid w-full grid-cols-[1fr_76px_88px_132px] items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-accent/50 focus-visible:outline-none',
+                                'grid w-full grid-cols-[1fr_140px_76px_88px_132px] items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-accent/50 focus-visible:outline-none',
                                 selected && 'bg-accent text-accent-foreground',
                               )}
                             >
@@ -754,6 +1036,7 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
                                 />
                                 <span className="truncate font-medium">{entry.name}</span>
                               </div>
+                              <div className="min-w-0">{renderEntryMetaBadges(entry, true)}</div>
                               <span className="truncate text-[11px] text-muted-foreground">
                                 {categoryLabel(entry.category)}
                               </span>

@@ -1,6 +1,8 @@
-# LocalFolio 工作台套件：
-# 把独立 @folio/* DSH 插件合装成一个可安装的工作台。
+# LocalFolio 工作台套件（产品安装入口）：
+# 把基础能力与框架桥接插件合装成一个可安装的工作台。
 # 插件之间只通过 Cordis 服务（folioStorage / folioRuntime / folioUi / folioShell / folioFrame）与 DSH Slot 协作。
+#
+# 这里刻意不含任何 test-* 插件：验证界面单独在 @folio/test-suite，按需另装。
 - insert:
     - id: base-storage-host
       name: '@folio/base-storage-host'
@@ -16,15 +18,3 @@
       name: '@folio/base-settings-ui'
     - id: bridge-frame-test-ui
       name: '@folio/bridge-frame-test-ui'
-    - id: test-overview-host
-      name: '@folio/test-overview-host'
-    - id: test-overview-ui
-      name: '@folio/test-overview-ui'
-    - id: test-gallery-ui
-      name: '@folio/test-gallery-ui'
-    - id: test-sidebar-ui
-      name: '@folio/test-sidebar-ui'
-    - id: test-shadcn-admin-ui
-      name: '@folio/test-shadcn-admin-ui'
-    - id: test-studio-admin-ui
-      name: '@folio/test-studio-admin-ui'

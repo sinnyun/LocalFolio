@@ -31,7 +31,7 @@ _Avoid_: 工作区、页面、模块
 _Avoid_: 底座、框架、核心、基础设施
 
 **Suite（工作台套件）**:
-把基础能力与各插件一次装进同一个 profile 的聚合元包（`@folio/workbench-suite`）；它自身被加载但不提供能力。
+把插件一次装进同一个 profile 的聚合元包，它自身被加载但不提供能力：`@folio/workbench-suite` 是产品安装入口（基础能力 + 桥接），`@folio/test-suite` 只装测试界面、按需另加。
 _Avoid_: 套件、全家桶、安装包、bundle
 
 **Plugin（插件）**:

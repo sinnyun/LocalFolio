@@ -1,11 +1,14 @@
-# LocalFolio 工作台套件的 profile 安装 / 实例验证脚本（默认 profile: lfdev，端口: 3081）。
-# 通过安装聚合元包 `bundles/workbench-suite` 一次性装配整套独立 DSH 插件。
+# LocalFolio 套件的 profile 安装 / 实例验证脚本（默认 profile: lfdev，端口: 3081）。
+# 开发默认装两个聚合元包：
+#   bundles/workbench-suite  产品入口：基础能力 + 框架桥接
+#   bundles/test-suite       六个 test-* 验证界面（产品安装不含它们）
+# 想只验证产品安装，手动 `dsh plugin --profile <name> add link:...\bundles\workbench-suite` 即可。
 #
-#   pwsh -File scripts\lfdev.ps1 install [-Profile <name>]   # link: 装入指定 profile，并清理指向旧路径的悬空 bundle
+#   pwsh -File scripts\lfdev.ps1 install [-Profile <name>]   # link: 装入两个套件，并清理指向旧路径的悬空 bundle
 #   pwsh -File scripts\lfdev.ps1 restart [-Port <port>]      # 重启实例并立即返回
 #   pwsh -File scripts\lfdev.ps1 url                        # 读取实例地址
-#   pwsh -File scripts\lfdev.ps1 verify                     # 校验 boot payload 包含所有 client 插件
-#   pwsh -File scripts\lfdev.ps1 stop                       # 停止实例
+#   pwsh -File scripts\lfdev.ps1 verify                      # 校验 boot payload 包含所有 client 插件
+#   pwsh -File scripts\lfdev.ps1 stop                        # 停止实例
 #
 # `desktop` profile 由 Electron 应用独占，CLI 会拒绝（"managed exclusively by the
 # Electron application"）；桌面版请在应用内的插件管理里添加依赖：
@@ -22,6 +25,8 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $SuiteDir = Join-Path $RepoRoot 'bundles\workbench-suite'
+$TestSuiteDir = Join-Path $RepoRoot 'bundles\test-suite'
+$SuiteNames = @('@folio/workbench-suite', '@folio/test-suite')
 $Exe = if ($env:DSH_EXE) { $env:DSH_EXE } else { 'D:\deepseekharness\DeepSeek Harness.exe' }
 $Bin = if ($env:DSH_BIN) { $env:DSH_BIN } else { 'D:\deepseekharness\resources\app.asar\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js' }
 
@@ -106,13 +111,9 @@ function Prune-StaleBundles {
   $manifest = Join-Path $env:USERPROFILE ".dsh\profiles\$Profile\package.json"
   if (-not (Test-Path $manifest)) { return }
 
-  $suiteName = '@folio/workbench-suite'
-  $doc = Get-Content $manifest -Raw | ConvertFrom-Json
-  if (-not $doc.dependencies) { return }
-
   $stale = @()
   foreach ($prop in @($doc.dependencies.PSObject.Properties)) {
-    if ($prop.Name -eq $suiteName) { continue }
+    if ($SuiteNames -contains $prop.Name) { continue }
     $spec = [string]$prop.Value
     $target = if ($spec -like 'link:*') { $spec.Substring(5) -replace '/', '\' } else { $null }
     $pointsHere = $target -and $target -like "*$RepoRoot*"
@@ -136,24 +137,27 @@ function Ensure-SuiteBundleEntry {
   $manifest = Join-Path $env:USERPROFILE ".dsh\profiles\$Profile\package.json"
   if (-not (Test-Path $manifest)) { return }
 
-  $suiteName = '@folio/workbench-suite'
   $doc = Get-Content $manifest -Raw | ConvertFrom-Json
   $bundles = @($doc.dsh.profile.bundles)
-  if ($bundles -contains $suiteName) { return }
+  $missing = @($SuiteNames | Where-Object { $bundles -notcontains $_ })
+  if ($missing.Count -eq 0) { return }
 
-  Write-Host "enabling $suiteName in profile $Profile"
-  $doc.dsh.profile.bundles = @($bundles + $suiteName)
+  foreach ($name in $missing) { Write-Host "enabling $name in profile $Profile" }
+  $doc.dsh.profile.bundles = @($bundles + $missing)
   ($doc | ConvertTo-Json -Depth 12) + "`n" | Set-Content -Path $manifest -Encoding utf8NoBOM
 }
 
 function Install-Bundle {
   Prune-StaleBundles
 
-  $spec = "link:$SuiteDir"
-  Write-Host "installing $spec into profile $Profile"
-  $r = Invoke-Dsh @('plugin', '--profile', $Profile, 'add', $spec)
-  if ($r.Out) { $r.Out.Trim() | Select-Object -Last 8 | ForEach-Object { Write-Host "  $_" } }
-  if ($r.Code -ne 0) { if ($r.Err) { Write-Host $r.Err }; throw "install exited $($r.Code)" }
+  foreach ($dir in @($SuiteDir, $TestSuiteDir)) {
+    $spec = "link:$dir"
+    Write-Host "installing $spec into profile $Profile"
+    $r = Invoke-Dsh @('plugin', '--profile', $Profile, 'add', $spec)
+    if ($r.Out) { $r.Out.Trim() | Select-Object -Last 8 | ForEach-Object { Write-Host "  $_" } }
+    if ($r.Code -ne 0) { if ($r.Err) { Write-Host $r.Err }; throw "install exited $($r.Code)" }
+  }
+
   Ensure-SuiteBundleEntry
   Ensure-WebAppBundle
 }

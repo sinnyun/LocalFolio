@@ -81,7 +81,7 @@ export function apply(ctx: Context) {
 | **Client（UI）插件包** | 有 `dsh.client` + `exports["./client"]` | 浏览器界面 |
 | **双 half 包** | 两者都有 | 前后端各半（LocalFolio 的 `*-host` + `*-ui`） |
 | **纯配置 bundle** | 只有 `dsh.bundle.patch`，行指向别人的包 | 组装已有插件（如接一个 MCP server） |
-| **聚合 bundle** | `dsh.bundle.patch` + 多条 `insert` + `dependencies` 指向自家插件 | 一键装整套（`@folio/workbench-suite`） |
+| **聚合 bundle** | `dsh.bundle.patch` + 多条 `insert` + `dependencies` 指向自家插件 | 一键装整套（`@folio/workbench-suite` 产品入口 / `@folio/test-suite` 测试界面） |
 | **连接器插件**（`connector` 组，0.2.3） | Host 包 + `dsh.bundle.patch`，注册第三方服务账号 | 接第三方服务：CLI app plugin（`dsh-cli-account` + `dsh-upstream-skills`）或 MCP connector（`dsh-mcp-account`），页面统一由 `dsh-client-ui-connector-account` 承载 |
 
 另有 **agent preset**（`@deepseek-ai/dsh-agent-preset`）：用 Cordis YAML 声明某类会话的能力组合，属于组合层。
@@ -1263,9 +1263,10 @@ export function apply(ctx: Context): void {
 | `base-*` | 工作台通用基础能力 | `base-storage-host`（`ctx.folioStorage`）、`base-runtime-host`（`ctx.folioRuntime`，`/lf/*` RPC + SSE）、`base-ui-kit`（`ctx.folioUi`）、`base-shell-ui`（`ctx.folioShell`）、`base-frame-ui`（`ctx.folioFrame`，四区布局框架，自身不画界面）、`base-settings-ui` |
 | `workspace-*` | 工作区（工作区栏的一项完整功能） | 预留：`workspace-canvas-ui`、`workspace-notes-ui` |
 | `feature-*` | 功能插件（只在一个工作区内部贡献功能） | 预留：`feature-canvas-layers-ui` |
-| `test-*` | 测试界面（只为验证界面与集成方式） | `test-overview-host`、`test-overview-ui`、`test-gallery-ui`、`test-sidebar-ui`、`test-shadcn-admin-ui`、`test-studio-admin-ui` |
+| `test-*` | 测试界面（只为验证界面与集成方式） | `test-overview-host`、`test-overview-ui`、`test-gallery-ui`、`test-sidebar-ui`、`test-shadcn-admin-ui`、`test-studio-admin-ui`（**只进 `test-suite`**） |
 | `bridge-*` | 桥接插件（把基础能力接进外壳 / 工具链 / 测试场景） | `bridge-frame-test-ui`（测试框架工作区） |
-| `workbench-suite` | 工作台套件（聚合元包） | `@folio/workbench-suite` |
+| `workbench-suite` | 工作台套件（产品安装入口：基础能力 + 桥接） | `@folio/workbench-suite` |
+| `test-suite` | 测试界面套件（只装 test-*，需先装产品套件） | `@folio/test-suite` |
 | `base-contract` | 编译期共享契约（不是插件） | `libs/base-contract` |
 
 ### 11.2 Host 侧
@@ -1337,7 +1338,7 @@ export function apply(ctx: Context): void {
 3. `plugins/workspace-xxx-ui`：`dsh.client.inject: ['@folio/base-ui-kit', '@folio/base-shell-ui', '@folio/base-frame-ui']`、`dsh.client.external: ['@folio/base-ui-kit']`、`inject: ['folioFrame', 'folioShell']`；向 `ctx.folioShell.registerWorkspace` 注册工作区，`MainView` 直接写 `ctx.folioFrame.WorkspaceHost`（认领宿主由它自己完成，不需要再设 `hideStatusBar`）。工作区内部的功能插件只 `inject: ['folioFrame']`，用 `registerApp({ id, title, Left, Main, Right, Status })` 声明四个区域。页面自带骨架的工作区可以完全不用框架，直接渲染自己的全屏主视图。
 4. 需要模型能力再加 `bridge-*`：`ctx.tools.register()`，工具名避开 §9。
 5. 各包的 `package.json` + 图标 + `locale/zh.json`（+ 可选 `meta.detail`），补 `engines.dsh`。
-6. 在 `bundles/workbench-suite/package.json` 与 `cordis.patch.yml` 各加一行。
+6. 加入对应套件：产品工作区加进 `bundles/workbench-suite/package.json` 与 `cordis.patch.yml`；验证用界面加进 `bundles/test-suite` 的同名两处。
 7. `pnpm install --offline && pnpm run verify`；用 `scripts/lfdev.ps1` 在隔离 profile 实测后再进日常 profile。
 
 ---

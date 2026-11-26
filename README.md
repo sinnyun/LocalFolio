@@ -50,9 +50,10 @@
 - `base-*`：工作台通用基础能力（`base-storage-host`、`base-runtime-host`、`base-ui-kit`、`base-shell-ui`、`base-frame-ui`、`base-settings-ui`）
 - `workspace-*`：工作区（顶部工作区栏的一项完整功能）
 - `feature-*`：功能插件（只在一个工作区内部贡献功能）
-- `test-*`：测试界面（只为验证界面与集成方式存在，最终删除或并入工作区）
+- `test-*`：测试界面（只为验证界面与集成方式存在，最终删除或并入工作区；**只进 `test-suite`，不进产品套件**）
 - `bridge-*`：桥接插件（把某项基础能力接进外壳、工具链或测试场景）
-- `workbench-suite`：工作台套件（聚合元包）
+- `workbench-suite`：产品安装入口（基础能力 + 桥接，不含 test-*）
+- `test-suite`：测试界面套件（只装 test-*，需要先装 workbench-suite）
 - `base-contract`：纯编译期共享契约（不是插件）
 
 形态后缀按需使用：`-host`（Host 侧能力）、`-ui`（Client 界面）、`-kit`（组件库）。
@@ -60,21 +61,22 @@
 ```text
 F:\AI\geren\LocalFolio\
 ├── bundles/
-│   └── workbench-suite/            @folio/workbench-suite     工作台套件（一份 cordis.patch.yml 拉起整套插件）
+│   ├── workbench-suite/            @folio/workbench-suite    产品安装入口：基础能力 + 框架桥接（不含任何 test-*）
+│   └── test-suite/                 @folio/test-suite         测试界面套件：六个 test-* 验证界面，按需另装
 ├── plugins/                        独立 DSH 插件目录（每包独立构建 lib/index.js & lib/client.js）
 │   ├── base-storage-host/          @folio/base-storage-host   基础存储能力：ctx.folioStorage
 │   ├── base-runtime-host/          @folio/base-runtime-host   基础运行时能力：ctx.folioRuntime（/lf/* RPC + SSE）
 │   ├── base-ui-kit/                @folio/base-ui-kit         基础 UI 组件库：ctx.folioUi、共享 Radix/lucide、.lf-* 样式、Portal/Toast 宿主
-│   ├── base-shell-ui/              @folio/base-shell-ui       基础外壳能力：ctx.folioShell（工作台 + 工作区栏 + 悬浮面板）
+│   ├── base-shell-ui/              @folio/base-shell-ui       基础外壳能力：ctx.folioShell（两层工作台 + 工作区栏 + 悬浮面板）
 │   ├── base-frame-ui/              @folio/base-frame-ui       基础布局框架：ctx.folioFrame（四区布局，自身不画界面）
 │   ├── base-settings-ui/           @folio/base-settings-ui    基础设置页：DSH 设置「我的插件」
-│   ├── bridge-frame-test-ui/       @folio/bridge-frame-test-ui 测试框架工作区（把布局框架挂进工作区栏）
-│   ├── test-overview-host/         @folio/test-overview-host  测试概览后端
-│   ├── test-overview-ui/           @folio/test-overview-ui    测试概览 UI（工作区 + 悬浮面板）
-│   ├── test-gallery-ui/            @folio/test-gallery-ui     测试图片画廊 UI（瀑布流 + Lightbox）
-│   ├── test-sidebar-ui/            @folio/test-sidebar-ui     测试侧栏示例 UI（sidebar-07）
-│   ├── test-shadcn-admin-ui/       @folio/test-shadcn-admin-ui 测试 Shadcn Admin UI
-│   └── test-studio-admin-ui/       @folio/test-studio-admin-ui 测试 Studio Admin UI
+│   ├── bridge-frame-test-ui/       @folio/bridge-frame-test-ui 测试框架工作区（把布局框架挂进工作区栏）— 随产品套件
+│   ├── test-overview-host/         @folio/test-overview-host  测试概览后端                      ┐
+│   ├── test-overview-ui/           @folio/test-overview-ui    测试概览 UI（形态 A + 悬浮面板）  │
+│   ├── test-gallery-ui/            @folio/test-gallery-ui     测试图片画廊 UI（形态 B）         ├ 只在 test-suite
+│   ├── test-sidebar-ui/            @folio/test-sidebar-ui     测试侧栏示例 UI（形态 B）         │
+│   ├── test-shadcn-admin-ui/       @folio/test-shadcn-admin-ui 测试 Shadcn Admin UI（形态 B）    │
+│   └── test-studio-admin-ui/       @folio/test-studio-admin-ui 测试 Studio Admin UI（形态 B）    ┘
 ├── libs/
 │   └── base-contract/              @folio/base-contract       协议类型、Cordis 服务声明与 RPC Hooks
 └── scripts/
@@ -107,11 +109,16 @@ pnpm run build:watch     # 修改哪个 plugins/* 就只重编该插件的 lib/c
 ### 3. 安装到 DSH profile
 
 ```powershell
-# 1) 以 link: 方式把工作台套件 @folio/workbench-suite 装入 profile（默认 lfdev）
+# 1) 以 link: 方式把两个套件装入 profile（默认 lfdev）：
+#    @folio/workbench-suite  产品入口（基础能力 + 框架桥接）
+#    @folio/test-suite       六个 test-* 验证界面
 pwsh -File scripts/lfdev.ps1 install
 
 # 其他 profile 也可以，例如给某个隔离环境（desktop 除外，见下）
 pwsh -File scripts/lfdev.ps1 install -Profile someprofile
+
+# 只想验证产品安装形态，不装测试界面：
+dsh plugin --profile lfdev add link:F:\AI\geren\LocalFolio\bundles\workbench-suite
 
 # 2) 启动实例（默认端口 3081）
 pwsh -File scripts/lfdev.ps1 restart
@@ -130,7 +137,7 @@ pwsh -File scripts/lfdev.ps1 stop
 > link:F:\AI\geren\LocalFolio\bundles\workbench-suite
 > ```
 >
-> 重启应用后生效；套件内的子插件仍可在 DSH 插件管理页单独启停。
+> 需要测试界面时再加一条 `link:F:\AI\geren\LocalFolio\bundles\test-suite`。重启应用后生效；套件内的子插件仍可在 DSH 插件管理页单独启停。
 
 ### 4. 如何新增一个工作区
 
@@ -148,7 +155,7 @@ pwsh -File scripts/lfdev.ps1 stop
    - 专属图标可直接 `import { ... } from 'lucide-react'`（esbuild 按图标 tree-shake，约 300B/个）；
    - 如需给基础能力补充通用 shadcn 原语：直接运行 `pnpm run ui:add <组件名或URL>`。
 3. **补齐显示与安装元信息**：`package.json` 加 `engines.dsh`（如 `^0.2.2-rc.5`）、`exports["./locale/*.json"]`、`exports["./icon"]`，`files` 带上 `locale` 与 `icon.svg`；写 `locale/zh.json` 与 `locale/en.json` 的 `meta.title`/`meta.description`（可选 `meta.detail` 指向 `docs/DETAIL.md`）。
-4. **加入工作台套件**：在 `bundles/workbench-suite/package.json` 和 `cordis.patch.yml` 各加一行。
+4. **加入套件**：产品工作区加进 `bundles/workbench-suite/{package.json,cordis.patch.yml}`；验证用的临时界面加进 `bundles/test-suite` 的同名两处，不要进产品套件。
 5. 运行 `pnpm install --offline && pnpm run verify`，重启 Host 或等 Client HMR 生效即可。
 
 ### 4.1 工作区内部的功能插件：只声明四个区域

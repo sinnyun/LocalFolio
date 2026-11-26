@@ -1,0 +1,19 @@
+# LocalFolio 测试界面套件：
+# 六个只为验证界面与集成方式而存在的插件，单独成一个可安装套件，
+# 不进 @folio/workbench-suite 的默认安装。
+#
+# 前置条件：同一 profile 里已装好 @folio/workbench-suite（提供 folioStorage /
+# folioRuntime / folioUi / folioShell / folioFrame）；缺任何一个，对应插件会保持 pending。
+- insert:
+    - id: test-overview-host
+      name: '@folio/test-overview-host'
+    - id: test-overview-ui
+      name: '@folio/test-overview-ui'
+    - id: test-gallery-ui
+      name: '@folio/test-gallery-ui'
+    - id: test-sidebar-ui
+      name: '@folio/test-sidebar-ui'
+    - id: test-shadcn-admin-ui
+      name: '@folio/test-shadcn-admin-ui'
+    - id: test-studio-admin-ui
+      name: '@folio/test-studio-admin-ui'

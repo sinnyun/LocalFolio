@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Workbench suite",
-    "description": "Installs the whole workbench at once: base capabilities (storage, runtime, UI kit, shell, layout frame, settings page), test surfaces and the bridge plugin. The workbench covers the native DSH UI without taking it over; Esc or Return to DSH goes back. Data is written only under %LOCALAPPDATA%/LocalFolio."
+    "description": "The product install entry: base capabilities (storage, runtime, UI kit, shell, layout frame, settings page) plus the frame bridge plugin. The workbench covers the native DSH UI without taking it over; Esc or Return to DSH goes back. Data is written only under %LOCALAPPDATA%/LocalFolio. Test surfaces are not included; install @folio/test-suite separately when needed."
   }
 }

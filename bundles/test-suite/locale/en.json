@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Test surfaces suite",
+    "description": "Installs the six test-only surfaces at once: overview, image gallery, sidebar sample, Shadcn Admin and Studio Admin ports, plus the overview host. They are not part of the product install, require the workbench suite first, and will eventually be deleted or folded into real workspaces.",
+    "detail": "docs/DETAIL.md"
+  }
+}

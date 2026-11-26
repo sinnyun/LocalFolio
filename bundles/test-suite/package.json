@@ -1,0 +1,38 @@
+{
+  "name": "@folio/test-suite",
+  "version": "0.3.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "description": "LocalFolio test-surface bundle: the six test-* plugins, installed on top of @folio/workbench-suite and never part of the default install.",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./icon": "./icon.svg",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale",
+    "docs"
+  ],
+  "dependencies": {
+    "@folio/test-overview-host": "link:../../plugins/test-overview-host",
+    "@folio/test-overview-ui": "link:../../plugins/test-overview-ui",
+    "@folio/test-gallery-ui": "link:../../plugins/test-gallery-ui",
+    "@folio/test-sidebar-ui": "link:../../plugins/test-sidebar-ui",
+    "@folio/test-shadcn-admin-ui": "link:../../plugins/test-shadcn-admin-ui",
+    "@folio/test-studio-admin-ui": "link:../../plugins/test-studio-admin-ui"
+  },
+  "engines": {
+    "dsh": "^0.2.2-rc.5"
+  }
+}

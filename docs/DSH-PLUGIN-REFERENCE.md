@@ -489,6 +489,8 @@ export function apply(ctx: Context): void {
 | `tool.call.toolview` | 工具调用行 | keyed，key = 工具名 |
 | `sidebar.*`（`panellist`、`panellist.actions`、`panel.icon`、`sidebar.right.*`） | 左右侧栏 | `panellist.actions` 是 list（root） |
 | `shell.overlay` | 应用之上的覆盖层 | LocalFolio 工作台/悬浮面板挂载点 |
+| `shell.bottom` / `shell.leading` | 三列下方整行 / macOS 顶左 chrome 座 | `shell.leading` 仅 darwin 且侧栏收起时挂载，Windows **不**挂载 |
+| （无 Slot）Windows 标题栏行 | `html[data-windows-titlebar]` 预留的 40px caption 条 | Desktop preload 注入 `[data-windows-menu]`（应用/编辑，`left: var(--dsh-windows-menu-start,48px)`、`z-index:1100`、`no-drag`），无对外扩展点；插件只能在自己 slot 内 `position: fixed` 自绘（DSH 侧栏的 rail 控件即如此），并自行 `no-drag`、避开右侧原生窗口按钮 |
 | `plugins.bundle.config` / `.activation` / `plugins.add.actions` | 插件页（详情配置、启用引导、添加菜单） | |
 | `settings.*` | 设置页导航与分页 | key 见 `ui-settings` README |
 

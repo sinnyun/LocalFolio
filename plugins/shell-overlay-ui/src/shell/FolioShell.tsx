@@ -14,6 +14,7 @@ import {
 import { WorkspaceErrorBoundary } from './ErrorBoundary.js'
 import { ShellLayout } from './ShellLayout.js'
 import { getPaneLayoutFor, useShellStore } from './shell-store.js'
+import { useWindowsCaptionMode } from './caption.js'
 
 export interface FolioShellProps {
   readonly workspaces: readonly WorkspaceUiContribution[]
@@ -59,6 +60,10 @@ function FolioShellInner({
   const toggleRightPanel = useShellStore(s => s.toggleRightPanel)
 
   const layout = getPaneLayoutFor(paneLayouts, activeId)
+  // Windows Desktop hosts the switcher, the panel toggles and the exit toggle
+  // in the window caption row (see CaptionBar), so the in-overlay top bar is
+  // dropped there; Web and macOS keep it.
+  const captionMode = useWindowsCaptionMode()
 
   const navigateTo = React.useCallback(
     (workspaceId: string, target?: unknown) => {
@@ -117,114 +122,116 @@ function FolioShellInner({
         fontSize: 13,
       }}
     >
-      <header
-        data-lf-topbar=""
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
-          height: 42,
-          padding: '0 12px',
-          flexShrink: 0,
-          borderBottom: '1px solid var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.12))',
-          background: 'var(--dsw-specific-sidebar-fill, #f9fafb)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-          <div
-            data-lf-brand=""
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              fontSize: 13,
-              fontWeight: 600,
-              flexShrink: 0,
-            }}
-          >
-            <FolioIconLayers size={15} />
-            <span>LocalFolio</span>
+      {captionMode ? null : (
+        <header
+          data-lf-topbar=""
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            height: 42,
+            padding: '0 12px',
+            flexShrink: 0,
+            borderBottom: '1px solid var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.12))',
+            background: 'var(--dsw-specific-sidebar-fill, #f9fafb)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <div
+              data-lf-brand=""
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                flexShrink: 0,
+              }}
+            >
+              <FolioIconLayers size={15} />
+              <span>LocalFolio</span>
+            </div>
+  
+            <FolioButton
+              variant="outline"
+              size="sm"
+              data-lf-exit=""
+              icon={<FolioIconBack size={13} />}
+              title="返回 DSH 原生界面 (Esc)"
+              onClick={onExit}
+            >
+              返回 DSH
+            </FolioButton>
+  
+            <div
+              aria-hidden="true"
+              style={{
+                width: 1,
+                height: 16,
+                margin: '0 4px',
+                background: 'var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.14))',
+              }}
+            />
+  
+            <nav
+              aria-label="工作区切换"
+              style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflowX: 'auto' }}
+            >
+              {sorted.map(ws => {
+                const Icon = ws.icon
+                const isActive = ws.id === activeId
+                return (
+                  <FolioButton
+                    key={ws.id}
+                    variant={isActive ? 'outline' : 'ghost'}
+                    size="sm"
+                    data-lf-workspace-tab={ws.id}
+                    aria-current={isActive ? 'page' : undefined}
+                    icon={Icon ? <Icon size={13} /> : undefined}
+                    onClick={() => onSelectWorkspace(ws.id)}
+                    style={
+                      isActive
+                        ? {
+                            background: 'var(--dsw-alias-button-ghost-active-fill, #ebebeb)',
+                            fontWeight: 600,
+                          }
+                        : undefined
+                    }
+                  >
+                    {ws.title}
+                  </FolioButton>
+                )
+              })}
+            </nav>
           </div>
-
-          <FolioButton
-            variant="outline"
-            size="sm"
-            data-lf-exit=""
-            icon={<FolioIconBack size={13} />}
-            title="返回 DSH 原生界面 (Esc)"
-            onClick={onExit}
-          >
-            返回 DSH
-          </FolioButton>
-
-          <div
-            aria-hidden="true"
-            style={{
-              width: 1,
-              height: 16,
-              margin: '0 4px',
-              background: 'var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.14))',
-            }}
-          />
-
-          <nav
-            aria-label="工作区切换"
-            style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflowX: 'auto' }}
-          >
-            {sorted.map(ws => {
-              const Icon = ws.icon
-              const isActive = ws.id === activeId
-              return (
-                <FolioButton
-                  key={ws.id}
-                  variant={isActive ? 'outline' : 'ghost'}
-                  size="sm"
-                  data-lf-workspace-tab={ws.id}
-                  aria-current={isActive ? 'page' : undefined}
-                  icon={Icon ? <Icon size={13} /> : undefined}
-                  onClick={() => onSelectWorkspace(ws.id)}
-                  style={
-                    isActive
-                      ? {
-                          background: 'var(--dsw-alias-button-ghost-active-fill, #ebebeb)',
-                          fontWeight: 600,
-                        }
-                      : undefined
-                  }
-                >
-                  {ws.title}
-                </FolioButton>
-              )
-            })}
-          </nav>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-          {activeWorkspace?.LeftPanel ? (
-            <FolioButton
-              variant="ghost"
-              size="sm"
-              data-lf-toggle-left=""
-              aria-pressed={!layout.leftCollapsed}
-              title={layout.leftCollapsed ? '展开左侧栏' : '折叠左侧栏'}
-              icon={<FolioIconPanelLeft size={14} />}
-              onClick={() => toggleLeftPanel(activeId)}
-            />
-          ) : null}
-          {activeWorkspace?.RightPanel ? (
-            <FolioButton
-              variant="ghost"
-              size="sm"
-              data-lf-toggle-right=""
-              aria-pressed={!layout.rightCollapsed}
-              title={layout.rightCollapsed ? '展开右侧栏' : '折叠右侧栏'}
-              icon={<FolioIconPanelLeft size={14} />}
-              onClick={() => toggleRightPanel(activeId)}
-            />
-          ) : null}
-        </div>
-      </header>
+  
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+            {activeWorkspace?.LeftPanel ? (
+              <FolioButton
+                variant="ghost"
+                size="sm"
+                data-lf-toggle-left=""
+                aria-pressed={!layout.leftCollapsed}
+                title={layout.leftCollapsed ? '展开左侧栏' : '折叠左侧栏'}
+                icon={<FolioIconPanelLeft size={14} />}
+                onClick={() => toggleLeftPanel(activeId)}
+              />
+            ) : null}
+            {activeWorkspace?.RightPanel ? (
+              <FolioButton
+                variant="ghost"
+                size="sm"
+                data-lf-toggle-right=""
+                aria-pressed={!layout.rightCollapsed}
+                title={layout.rightCollapsed ? '展开右侧栏' : '折叠右侧栏'}
+                icon={<FolioIconPanelLeft size={14} />}
+                onClick={() => toggleRightPanel(activeId)}
+              />
+            ) : null}
+          </div>
+        </header>
+      )}
 
       <ShellLayout
         workspace={activeWorkspace}

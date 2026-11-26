@@ -7,9 +7,11 @@ import type {
   WorkspaceUiContribution,
 } from '@folio/lib-shared-contract'
 import { FolioButton, FolioIconLayers } from '@folio/core-ui-kit/client'
+import { CaptionBar, type CaptionBarBridge } from './shell/CaptionBar.js'
 import { FloatingPanelHost } from './shell/FloatingPanelHost.js'
 import { FolioShell } from './shell/FolioShell.js'
 import { useShellStore } from './shell/shell-store.js'
+import { useWindowsCaptionMode } from './shell/caption.js'
 import { useShortcutIsolation, type DshShortcutService } from './shell/shortcuts.js'
 
 const OVERLAY_SLOT = 'shell.overlay'
@@ -238,6 +240,14 @@ export function createShellOverlayPlugin(options: CreateShellOverlayPluginOption
 
       const controller = options.controller ?? createShellController(false)
       const entryCoordinator = createEntrySlotCoordinator()
+      const captionBridge: CaptionBarBridge = {
+        isOpen: controller.isOpen,
+        subscribeOpen: controller.subscribeOpen,
+        toggle: controller.toggle,
+        open: controller.open,
+        listWorkspaces: controller.listWorkspaces,
+        subscribeWorkspaces: controller.subscribeWorkspaces,
+      }
 
       const resolveShortcuts = (): DshShortcutService | undefined => {
         if (typeof clientCtx.get !== 'function') return undefined
@@ -261,8 +271,11 @@ export function createShellOverlayPlugin(options: CreateShellOverlayPluginOption
             entryCoordinator.getWinner,
             entryCoordinator.getWinner,
           )
+          // Windows Desktop exposes the single caption toggle instead (CaptionBar).
+          const captionMode = useWindowsCaptionMode()
 
           React.useEffect(() => entryCoordinator.mount(slotName), [])
+          if (captionMode) return null
           if (winner !== null && winner !== slotName) return null
 
           return (
@@ -360,8 +373,22 @@ export function createShellOverlayPlugin(options: CreateShellOverlayPluginOption
         return <FloatingPanelHost panels={panels} />
       }
 
+      /**
+       * Windows Desktop caption row on `shell.overlay` (order: 0): one toggle
+       * for the plugin panel, the workspace switcher, and the panel toggles.
+       * It is mounted independently of the overlay so the entry stays reachable
+       * while the panel is closed, and renders nothing in the browser or on macOS.
+       */
+      const FolioCaption: React.FC = () => <CaptionBar bridge={captionBridge} />
+
       ctx.effect(() => {
         const disposeService = ctx.provide('folioShell', controller)
+        const disposeCaption = slots.inject(OVERLAY_SLOT, () =>
+          slots.register(
+            { name: OVERLAY_SLOT, id: 'folio.shell.caption', order: 0 },
+            FolioCaption,
+          ),
+        )
         const disposeOverlay = slots.inject(OVERLAY_SLOT, () =>
           slots.register(
             { name: OVERLAY_SLOT, id: 'folio.shell.overlay', order: 1 },
@@ -388,9 +415,10 @@ export function createShellOverlayPlugin(options: CreateShellOverlayPluginOption
           for (const d of disposeEntries) d?.()
           disposeFloating?.()
           disposeOverlay?.()
+          disposeCaption?.()
           disposeService()
         }
-      }, 'shell-overlay-ui: service + overlay + floating + entry slots')
+      }, 'shell-overlay-ui: service + caption + overlay + floating + entry slots')
     },
   }
 }
@@ -402,5 +430,15 @@ export const apply = defaultPlugin.apply
 export default defaultPlugin
 
 export { FolioShell } from './shell/FolioShell.js'
+export { CaptionBar, type CaptionBarBridge } from './shell/CaptionBar.js'
+export {
+  CAPTION_GAP,
+  WINDOWS_TITLEBAR_ATTR,
+  isWindowsCaption,
+  resolveCaptionMetrics,
+  useWindowsCaptionMetrics,
+  useWindowsCaptionMode,
+  type CaptionMetrics,
+} from './shell/caption.js'
 export { FloatingPanelHost, clampFloatingRect } from './shell/FloatingPanelHost.js'
 export { isEditableEventTarget, useShortcutIsolation } from './shell/shortcuts.js'

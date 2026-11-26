@@ -12,7 +12,7 @@
 1. **零隔离墙、原生融合**：不套 Shadow DOM，所有 UI 插件直接运行在 DSH 主文档中，使用 `--dsw-alias-*` / `--dsw-font-family` 等宿主主题令牌，并复用平台表内置的单实例 `react`、`zod`、`@tanstack/react-virtual`（全部走 `external`，0 字节重复打包）。按钮、标签、表单、弹层、图标等基础控件由独立插件 `@folio/core-ui-kit`（Radix UI + `lucide-react` + `.lf-*` 样式）统一提供，业务插件通过 `dsh.client.external` 零重复打包复用，**不 require `@deepseek-ai/dsh-client-ui-*`**。
 2. **插件间零直接 `import`**：每个功能都是独立 DSH 插件，通过 DSH 原生 **Cordis Service（`ctx.provide` 注册 / `inject` 依赖）** 与 **Slot 树（`ctx.slots`）** 松耦合协作，支持单插件独立启停与局部热重载（HMR）。
 3. **双形态承载新面板**：
-   - **全屏可退回工作台**：挂在 DSH `shell.overlay`（`order: 1`），点击顶栏 `LocalFolio` 进入，按 `Esc` 或点「返回 DSH」无损回到原生 DSH 界面；
+   - **全屏可退回工作台**：挂在 DSH `shell.overlay`（`order: 1`）。Windows 桌面版（`html[data-windows-titlebar]`）把这套控件搬进 DSH 标题栏、「应用 / 编辑」之后：一个按钮在「插件面板 ⇄ 返回 DSH」之间切换，工作区切换与左右面板开关同排，覆盖层自身不再画顶栏（无品牌标识）；Web 与 macOS 桌面保持覆盖层内顶栏（标识 + 返回 DSH + 切换 + 面板开关）不变。按 `Esc` 同样无损回到原生 DSH 界面；
    - **自由悬浮面板**：挂在 DSH `shell.overlay`（`order: 2`），任何新插件只需调用 `ctx.folioShell.registerFloatingPanel(...)` 即可获得**自由拖拽、八向缩放、一键最大化/还原、多窗置顶与位置记忆**，可悬浮在工作台或原生 DSH 之上。
 4. **每插件独立存储**：所有插件持久化数据统一落盘在 `%LOCALAPPDATA%\LocalFolio\plugins\<pluginId>\{data,cache}\`（底层优先经由 DSH `ctx.fs` Seam），严禁写入 DSH 自身的 `~/.dsh/storages/workspace.json` 或会话目录。
 

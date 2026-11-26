@@ -18,3 +18,7 @@
       name: '@folio/base-settings-ui'
     - id: bridge-frame-test-ui
       name: '@folio/bridge-frame-test-ui'
+    - id: workspace-files-host
+      name: '@folio/workspace-files-host'
+    - id: workspace-files-ui
+      name: '@folio/workspace-files-ui'

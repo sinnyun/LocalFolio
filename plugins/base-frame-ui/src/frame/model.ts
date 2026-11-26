@@ -31,6 +31,8 @@ export interface FrameAppLayoutState {
 export interface FrameState {
   readonly apps: readonly FrameAppDefinition[]
   readonly activeAppId: string
+  readonly hostWorkspaceId: string | null
+  readonly activeAppByWorkspace: Readonly<Record<string, string>>
   readonly layouts: Readonly<Record<string, FrameAppLayoutState>>
 }
 
@@ -54,6 +56,7 @@ export function appOrder(app: FrameAppDefinition): number {
 export function summarizeApp(app: FrameAppDefinition): FrameAppSummary {
   return {
     id: app.id,
+    workspaceId: app.workspaceId,
     title: app.title,
     subtitle: app.subtitle,
     pluginId: app.pluginId,
@@ -80,9 +83,47 @@ export function resolveLayout(
   }
 }
 
-/** The persisted id wins while it exists; otherwise the first registered app. */
-export function resolveActiveApp(state: FrameState): FrameAppDefinition | undefined {
-  return state.apps.find(app => app.id === state.activeAppId) ?? state.apps[0]
+/**
+ * Filter registered apps for a specific host workspace.
+ * If apps explicitly declare `workspaceId`, that workspace owns them;
+ * otherwise unbound apps (`!app.workspaceId`) are shown.
+ */
+export function resolveWorkspaceApps(
+  apps: readonly FrameAppDefinition[],
+  workspaceId?: string | null,
+): readonly FrameAppDefinition[] {
+  if (!workspaceId) return apps
+  const scoped = apps.filter(app => app.workspaceId === workspaceId)
+  if (scoped.length > 0) return scoped
+  return apps.filter(app => !app.workspaceId)
+}
+
+/** The persisted id wins while it exists in scope; otherwise the first scoped app. */
+export function resolveActiveApp(
+  state: FrameState,
+  workspaceId?: string | null,
+): FrameAppDefinition | undefined {
+  const effectiveWorkspaceId = workspaceId !== undefined ? workspaceId : state.hostWorkspaceId
+  const scoped = resolveWorkspaceApps(state.apps, effectiveWorkspaceId)
+  const wsActiveId = effectiveWorkspaceId
+    ? state.activeAppByWorkspace[effectiveWorkspaceId]
+    : undefined
+  if (wsActiveId) {
+    const match = scoped.find(app => app.id === wsActiveId)
+    if (match) return match
+  }
+  return scoped.find(app => app.id === state.activeAppId) ?? scoped[0]
+}
+
+export function sanitizeActiveAppByWorkspace(input: unknown): Record<string, string> {
+  if (!input || typeof input !== 'object') return {}
+  const result: Record<string, string> = {}
+  for (const [wsId, appId] of Object.entries(input as Record<string, unknown>)) {
+    if (wsId && typeof appId === 'string' && appId.length > 0) {
+      result[wsId] = appId
+    }
+  }
+  return result
 }
 
 function toFiniteNumber(value: unknown): number | undefined {

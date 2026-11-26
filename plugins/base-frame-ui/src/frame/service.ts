@@ -21,12 +21,13 @@ export function createFrameController(
   app: FrameAppDefinition,
   state: FrameState,
   store: FrameStore = frameStore,
+  scopedApps?: readonly FrameAppDefinition[],
 ): FrameController {
   const layout = resolveLayout(app, state.layouts[app.id])
   return {
     appId: app.id,
     layout,
-    listApps: () => state.apps.map(summarizeApp),
+    listApps: () => (scopedApps ?? state.apps).map(summarizeApp),
     activateApp: appId => store.setActiveApp(appId),
     setLeftCollapsed: collapsed => store.setLayout(app.id, { leftCollapsed: collapsed }),
     setRightCollapsed: collapsed => store.setLayout(app.id, { rightCollapsed: collapsed }),
@@ -40,7 +41,7 @@ export function createFrameController(
 
 export interface FolioFrameServiceOptions {
   /** The frame view handed to the workspace that hosts it. */
-  readonly View: React.ComponentType
+  readonly View: React.ComponentType<{ workspaceId?: string }>
   /** Navigate to the host workspace; supplied by the client plugin through folioShell. */
   readonly openWorkspace?: (workspaceId: string) => void
 }
@@ -59,7 +60,7 @@ export function createFolioFrameService(options: FolioFrameServiceOptions): Foli
     WorkspaceHost(props: WorkspaceViewProps): React.ReactElement {
       const { workspaceId } = props
       React.useEffect(() => service.attachHostWorkspace(workspaceId), [workspaceId])
-      return React.createElement(options.View)
+      return React.createElement(options.View, { workspaceId })
     },
 
     registerApp(definition) {
@@ -88,8 +89,10 @@ export function createFolioFrameService(options: FolioFrameServiceOptions): Foli
     activateApp: appId => frameStore.setActiveApp(appId),
 
     openApp: appId => {
+      const targetApp = frameStore.getState().apps.find(item => item.id === appId)
       frameStore.setActiveApp(appId)
-      if (hostWorkspaceId !== null) options.openWorkspace?.(hostWorkspaceId)
+      const targetWorkspaceId = targetApp?.workspaceId ?? hostWorkspaceId
+      if (targetWorkspaceId !== null) options.openWorkspace?.(targetWorkspaceId)
     },
 
     getLayout: appId => {
@@ -105,8 +108,12 @@ export function createFolioFrameService(options: FolioFrameServiceOptions): Foli
 
     attachHostWorkspace(workspaceId) {
       hostWorkspaceId = workspaceId
+      frameStore.setHostWorkspace(workspaceId)
       return () => {
-        if (hostWorkspaceId === workspaceId) hostWorkspaceId = null
+        if (hostWorkspaceId === workspaceId) {
+          hostWorkspaceId = null
+          frameStore.setHostWorkspace(null)
+        }
       }
     },
   }

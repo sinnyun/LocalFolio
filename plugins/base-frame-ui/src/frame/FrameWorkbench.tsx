@@ -24,6 +24,7 @@ import {
   MIN_RIGHT_WIDTH,
   resolveActiveApp,
   resolveLayout,
+  resolveWorkspaceApps,
   summarizeApp,
 } from './model.js'
 import { createFrameController } from './service.js'
@@ -99,7 +100,10 @@ function FrameBody({ app, apps, state, layout }: FrameBodyProps): React.ReactEle
   const surfaceRef = React.useRef<HTMLDivElement | null>(null)
   const surfaceWidth = useMeasuredWidth(surfaceRef)
   const [resizing, setResizing] = React.useState<'left' | 'right' | null>(null)
-  const controller = React.useMemo(() => createFrameController(app, state), [app, state])
+  const controller = React.useMemo(
+    () => createFrameController(app, state, frameStore, apps),
+    [app, state, apps],
+  )
   const appSummaries = React.useMemo(() => apps.map(summarizeApp), [apps])
 
   const Left = app.Left
@@ -330,15 +334,21 @@ function FrameBody({ app, apps, state, layout }: FrameBodyProps): React.ReactEle
  * renders `ctx.folioFrame.View` and attaches itself through
  * `folioFrame.attachHostWorkspace`, so the frame only appears where it is hosted.
  */
-export function FrameWorkbench(): React.ReactElement {
+export function FrameWorkbench({
+  workspaceId,
+}: {
+  readonly workspaceId?: string
+} = {}): React.ReactElement {
   const state = useFrameState()
-  const active = resolveActiveApp(state)
+  const effectiveWorkspaceId = workspaceId ?? state.hostWorkspaceId
+  const scopedApps = resolveWorkspaceApps(state.apps, effectiveWorkspaceId)
+  const active = resolveActiveApp(state, effectiveWorkspaceId)
   if (!active) return <FrameEmptyState />
 
   return (
     <FrameBody
       app={active}
-      apps={state.apps}
+      apps={scopedApps}
       state={state}
       layout={resolveLayout(active, state.layouts[active.id])}
     />

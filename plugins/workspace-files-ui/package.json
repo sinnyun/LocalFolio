@@ -1,0 +1,47 @@
+{
+  "name": "@folio/workspace-files-ui",
+  "version": "0.3.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "description": "LocalFolio official File Browser workspace built on @folio/base-frame-ui: quick folders, drives, lazy directory tree, dual-pane browser, editable breadcrumbs, filter, grid/list views, grid sizing, grouping, Windows shell thumbnails, and file inspector.",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@folio/base-ui-kit",
+        "@folio/base-shell-ui",
+        "@folio/base-frame-ui"
+      ],
+      "external": [
+        "@folio/base-ui-kit"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "locale",
+    "icon.svg",
+    "docs"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.0",
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@folio/base-contract": "workspace:*",
+    "@folio/base-ui-kit": "workspace:*",
+    "lucide-react": "^0.511.0"
+  },
+  "engines": {
+    "dsh": "^0.2.2-rc.5"
+  }
+}

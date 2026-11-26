@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "File Browser Host",
+    "description": "Provides local directory listing, drive capacity inspection, Windows native Shell thumbnail extraction, media streaming, file metadata inspection, and OS file explorer reveal."
+  }
+}

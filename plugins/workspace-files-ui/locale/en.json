@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "File Browser",
+    "description": "LocalFolio's first official workspace built on the four-region layout frame: quick folders, drives, lazy directory tree, dual-pane browser with editable breadcrumbs, filtering, grid/list views, grouping, Windows native thumbnails, and collapsible file inspector.",
+    "detail": "docs/DETAIL.md"
+  }
+}

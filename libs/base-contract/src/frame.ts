@@ -41,6 +41,7 @@ export interface FrameLayoutDefaults {
 
 export interface FrameAppSummary {
   readonly id: string
+  readonly workspaceId?: string
   readonly title: string
   readonly subtitle?: string
   readonly pluginId?: string
@@ -82,6 +83,8 @@ export interface FrameProviderProps {
 export interface FrameAppDefinition {
   /** Unique app id, e.g. `notes.workbench`. Also the persisted layout key. */
   readonly id: string
+  /** Optional host workspace id so multiple Form-A workspaces can scope their own apps. */
+  readonly workspaceId?: string
   readonly title: string
   readonly subtitle?: string
   readonly pluginId?: string

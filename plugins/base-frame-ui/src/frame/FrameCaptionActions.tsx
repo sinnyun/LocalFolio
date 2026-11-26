@@ -14,7 +14,7 @@ import { frameStore, useFrameState } from './store.js'
  */
 export function FrameCaptionActions({ isOpen }: CaptionActionProps): React.ReactElement | null {
   const state = useFrameState()
-  const active = resolveActiveApp(state)
+  const active = resolveActiveApp(state, state.hostWorkspaceId)
   if (!isOpen || !active) return null
 
   const hasLeft = Boolean(active.Left)

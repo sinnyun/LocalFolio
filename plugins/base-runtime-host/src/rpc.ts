@@ -1,9 +1,12 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Hono } from 'hono'
 import {
+  FolioError,
   normalizeError,
   type ActionSource,
   type EventBus,
+  type FolioRouteHandler,
+  type FolioRouteMethod,
   type InvalidateEvent,
 } from '@folio/base-contract'
 
@@ -123,13 +126,51 @@ export interface FolioRpc {
   readonly prefix: string
   readonly fetch: (request: Request) => Response | Promise<Response>
   readonly nodeHandler: (req: IncomingMessage, res: ServerResponse) => Promise<void>
+  registerRoute(method: FolioRouteMethod, subPath: string, handler: FolioRouteHandler): () => void
   dispose(): void
+}
+
+function normalizeRouteSubPath(subPath: string): string {
+  const trimmed = subPath.trim()
+  const withLeading = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+  const normalized = withLeading.length > 1 ? withLeading.replace(/\/+$/, '') : withLeading
+  if (!normalized || normalized === '/') {
+    throw new FolioError('invalid_route', '自定义路由路径不能为空', 400)
+  }
+  if (
+    normalized === '/health' ||
+    normalized === '/events' ||
+    normalized === '/rpc' ||
+    normalized.startsWith('/rpc/')
+  ) {
+    throw new FolioError('reserved_route', `路由路径已被保留: ${normalized}`, 400)
+  }
+  return normalized
 }
 
 export function createRpcApp(options: CreateRpcOptions): FolioRpc {
   const prefix = (options.routePrefix ?? '/lf').replace(/\/+$/, '')
   const app = new Hono()
   const activeStreams = new Set<() => void>()
+  const routes = new Map<string, FolioRouteHandler>()
+
+  const registerRoute = (
+    method: FolioRouteMethod,
+    subPath: string,
+    handler: FolioRouteHandler,
+  ): (() => void) => {
+    const normalized = normalizeRouteSubPath(subPath)
+    const key = `${method}:${normalized}`
+    if (routes.has(key)) {
+      throw new FolioError('duplicate_route', `路由已注册: ${method} ${normalized}`, 409)
+    }
+    routes.set(key, handler)
+    return () => {
+      if (routes.get(key) === handler) {
+        routes.delete(key)
+      }
+    }
+  }
 
   const resolveOrigins = (): readonly string[] => {
     if (typeof options.trustedOrigins === 'function') {
@@ -291,6 +332,30 @@ export function createRpcApp(options: CreateRpcOptions): FolioRpc {
     })
   })
 
+  app.on(['GET', 'HEAD'], `${prefix}/*`, async c => {
+    const pathname = new URL(c.req.url).pathname
+    const rawSubPath = pathname.slice(prefix.length) || '/'
+    const subPath = rawSubPath.length > 1 ? rawSubPath.replace(/\/+$/, '') : rawSubPath
+    const method = c.req.method.toUpperCase()
+    const handler =
+      routes.get(`${method}:${subPath}`) ??
+      (method === 'HEAD' ? routes.get(`GET:${subPath}`) : undefined)
+
+    if (!handler) {
+      return c.json(
+        { ok: false, error: { code: 'route_not_found', message: `未找到路由: ${subPath}` } },
+        404,
+      )
+    }
+
+    try {
+      return await handler(c.req.raw)
+    } catch (error) {
+      const { status, payload } = normalizeError(error)
+      return c.json({ ok: false, error: payload }, status as 400 | 403 | 404 | 500)
+    }
+  })
+
   const nodeHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const host = req.headers.host || '127.0.0.1'
     const url = `http://${host}${req.url || '/'}`
@@ -361,7 +426,9 @@ export function createRpcApp(options: CreateRpcOptions): FolioRpc {
     prefix,
     fetch: request => app.fetch(request),
     nodeHandler,
+    registerRoute,
     dispose() {
+      routes.clear()
       for (const close of Array.from(activeStreams)) close()
       activeStreams.clear()
     },

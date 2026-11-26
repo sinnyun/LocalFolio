@@ -4,6 +4,7 @@ import {
   FRAME_STORAGE_KEY,
   clampLeftWidth,
   clampRightWidth,
+  sanitizeActiveAppByWorkspace,
   sanitizeLayouts,
   sortApps,
   type FrameAppLayoutState,
@@ -14,15 +15,21 @@ type Listener = () => void
 
 interface PersistedFrameState {
   readonly activeAppId?: unknown
+  readonly activeAppByWorkspace?: unknown
   readonly layouts?: unknown
 }
 
-function emptyPersisted(): { activeAppId: string; layouts: Record<string, FrameAppLayoutState> } {
-  return { activeAppId: '', layouts: {} }
+function emptyPersisted(): {
+  activeAppId: string
+  activeAppByWorkspace: Record<string, string>
+  layouts: Record<string, FrameAppLayoutState>
+} {
+  return { activeAppId: '', activeAppByWorkspace: {}, layouts: {} }
 }
 
 function readPersisted(): {
   activeAppId: string
+  activeAppByWorkspace: Record<string, string>
   layouts: Record<string, FrameAppLayoutState>
 } {
   if (typeof window === 'undefined') return emptyPersisted()
@@ -32,6 +39,7 @@ function readPersisted(): {
     const parsed = JSON.parse(raw) as PersistedFrameState
     return {
       activeAppId: typeof parsed.activeAppId === 'string' ? parsed.activeAppId : '',
+      activeAppByWorkspace: sanitizeActiveAppByWorkspace(parsed.activeAppByWorkspace),
       layouts: sanitizeLayouts(parsed.layouts),
     }
   } catch {
@@ -54,6 +62,8 @@ export class FrameStore {
     this.state = {
       apps: initial?.apps ?? [],
       activeAppId: initial?.activeAppId ?? persisted.activeAppId,
+      hostWorkspaceId: initial?.hostWorkspaceId ?? null,
+      activeAppByWorkspace: initial?.activeAppByWorkspace ?? persisted.activeAppByWorkspace,
       layouts: initial?.layouts ?? persisted.layouts,
     }
   }
@@ -84,9 +94,21 @@ export class FrameStore {
     }
   }
 
+  setHostWorkspace(workspaceId: string | null): void {
+    if (this.state.hostWorkspaceId === workspaceId) return
+    this.state = { ...this.state, hostWorkspaceId: workspaceId }
+    for (const listener of this.listeners) listener()
+  }
+
   setActiveApp(appId: string): void {
-    if (this.state.activeAppId === appId) return
-    this.patchState({ activeAppId: appId })
+    const targetApp = this.state.apps.find(app => app.id === appId)
+    const wsKey = targetApp?.workspaceId ?? this.state.hostWorkspaceId
+    const nextByWs =
+      wsKey && this.state.activeAppByWorkspace[wsKey] !== appId
+        ? { ...this.state.activeAppByWorkspace, [wsKey]: appId }
+        : this.state.activeAppByWorkspace
+    if (this.state.activeAppId === appId && nextByWs === this.state.activeAppByWorkspace) return
+    this.patchState({ activeAppId: appId, activeAppByWorkspace: nextByWs })
   }
 
   setLayout(appId: string, patch: Partial<FrameLayoutSnapshot>): void {
@@ -117,7 +139,13 @@ export class FrameStore {
       this.persistTimer = null
     }
     this.listeners.clear()
-    this.state = { apps: [], activeAppId: '', layouts: {} }
+    this.state = {
+      apps: [],
+      activeAppId: '',
+      hostWorkspaceId: null,
+      activeAppByWorkspace: {},
+      layouts: {},
+    }
   }
 
   private patchState(patch: Partial<FrameState>): void {
@@ -139,6 +167,7 @@ export class FrameStore {
     try {
       const payload = JSON.stringify({
         activeAppId: this.state.activeAppId,
+        activeAppByWorkspace: this.state.activeAppByWorkspace,
         layouts: this.state.layouts,
       })
       window.localStorage.setItem(FRAME_STORAGE_KEY, payload)

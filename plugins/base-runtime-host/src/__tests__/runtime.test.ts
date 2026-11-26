@@ -158,4 +158,51 @@ describe('@folio/base-runtime-host', () => {
     })
     expect(admit({ headers: {} })).toBe(true)
   })
+
+  it('registers custom GET/HEAD routes behind same-origin and admit middleware', async () => {
+    const off = runtime.registerRoute('GET', '/files/ping', req => {
+      const url = new URL(req.url)
+      return new Response(`pong:${url.searchParams.get('q') ?? ''}`, {
+        status: 200,
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+      })
+    })
+
+    try {
+      const noAuth = await runtime.rpc.fetch(
+        new Request('http://127.0.0.1:3081/lf/files/ping?q=1', {
+          headers: { host: '127.0.0.1:3081' },
+        }),
+      )
+      expect(noAuth.status).toBe(401)
+
+      const crossOrigin = await runtime.rpc.fetch(
+        new Request('http://127.0.0.1:3081/lf/files/ping?q=1', {
+          headers: {
+            host: '127.0.0.1:3081',
+            origin: 'https://evil.example.com',
+            'x-test-auth': 'ok',
+          },
+        }),
+      )
+      expect(crossOrigin.status).toBe(403)
+
+      const okRes = await runtime.rpc.fetch(
+        new Request('http://127.0.0.1:3081/lf/files/ping?q=abc', {
+          headers: { host: '127.0.0.1:3081', 'x-test-auth': 'ok' },
+        }),
+      )
+      expect(okRes.status).toBe(200)
+      expect(await okRes.text()).toBe('pong:abc')
+    } finally {
+      off()
+    }
+
+    const afterDispose = await runtime.rpc.fetch(
+      new Request('http://127.0.0.1:3081/lf/files/ping', {
+        headers: { host: '127.0.0.1:3081', 'x-test-auth': 'ok' },
+      }),
+    )
+    expect(afterDispose.status).toBe(404)
+  })
 })

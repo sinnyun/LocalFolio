@@ -4,7 +4,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import type { WorkspaceViewProps } from '@folio/base-contract'
 import { createFolioFrameService } from '../frame/service.js'
+import { FrameWorkbench } from '../frame/FrameWorkbench.js'
 import { frameStore } from '../frame/store.js'
+
+function FrameWorkbenchWrapper(props: { workspaceId?: string }): React.ReactElement {
+  return <FrameWorkbench workspaceId={props.workspaceId} />
+}
 
 afterEach(() => {
   cleanup()
@@ -34,5 +39,38 @@ describe('folioFrame.WorkspaceHost', () => {
     unmount()
     service.openApp('notes.workbench')
     expect(opened).toEqual(['notes'])
+  })
+
+  it('scopes apps by workspaceId across multiple Form-A workspaces', () => {
+    const opened: string[] = []
+    const service = createFolioFrameService({
+      View: FrameWorkbenchWrapper,
+      openWorkspace: workspaceId => opened.push(workspaceId),
+    })
+
+    service.registerApp({
+      id: 'frame.demo',
+      title: '演示应用',
+      Main: () => <div data-testid="demo-main">Demo</div>,
+    })
+    service.registerApp({
+      id: 'files.browser',
+      workspaceId: 'files',
+      title: '文件浏览器',
+      Main: () => <div data-testid="files-main">Files</div>,
+    })
+
+    const { rerender } = render(
+      <service.WorkspaceHost {...({ workspaceId: 'files' } as WorkspaceViewProps)} />,
+    )
+    expect(screen.getByTestId('files-main').textContent).toBe('Files')
+    expect(screen.queryByTestId('demo-main')).toBeNull()
+
+    rerender(<service.WorkspaceHost {...({ workspaceId: 'frame-test' } as WorkspaceViewProps)} />)
+    expect(screen.getByTestId('demo-main').textContent).toBe('Demo')
+    expect(screen.queryByTestId('files-main')).toBeNull()
+
+    service.openApp('files.browser')
+    expect(opened).toEqual(['files'])
   })
 })

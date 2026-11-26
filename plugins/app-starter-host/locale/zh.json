@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "概览后端样板",
-    "description": "独立 Host 业务插件样板：注入 folioRuntime 与 folioStorage，注册带输入校验的动作，并把状态写进自己的插件存储。"
-  }
-}

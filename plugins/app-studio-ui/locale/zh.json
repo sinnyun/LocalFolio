@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "Studio Admin 控制台",
-    "description": "把 arhamkhnz/next-shadcn-admin-dashboard（Studio Admin）移植进 LocalFolio 工作台：可折叠图标侧栏与 sidebar/floating/inset 三种形态、⌘J 命令搜索、四套主题预设、布局偏好控制、仪表盘图表与客户数据表，全部复用 @folio/core-ui-kit 的共享控件与 DSH 主题令牌。"
-  }
-}

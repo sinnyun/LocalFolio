@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Test overview backend",
+    "description": "Test Host plugin: injects folioRuntime and folioStorage, registers validated actions and keeps its state in its own plugin storage."
+  }
+}

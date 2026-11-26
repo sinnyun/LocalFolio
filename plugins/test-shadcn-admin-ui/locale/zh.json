@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "测试 Shadcn Admin UI",
+    "description": "测试用 UI 插件：把 satnaing/shadcn-admin 的后台界面移植进工作台，验证复杂布局与组件覆盖度。",
+    "detail": "docs/DETAIL.md"
+  }
+}

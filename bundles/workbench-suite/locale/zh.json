@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "工作台套件",
+    "description": "把工作台一次装齐：基础能力（存储、运行时、UI 组件库、外壳、布局框架、设置页）、测试界面与桥接插件。工作台覆盖在 DSH 原生界面之上但不接管它，按 Esc 或点「返回 DSH」即回到原生界面；数据只写入 %LOCALAPPDATA%/LocalFolio，不碰 DSH 自己的存储与会话目录。",
+    "detail": "docs/DETAIL.md"
+  }
+}

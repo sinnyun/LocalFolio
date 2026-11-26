@@ -1,0 +1,44 @@
+{
+  "name": "@folio/test-gallery-ui",
+  "version": "0.3.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone masonry image gallery UI plugin built purely on @folio/base-ui-kit shared components (Tabs, Button, Empty, Lightbox) and Tailwind utilities.",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@folio/base-ui-kit",
+        "@folio/base-shell-ui"
+      ],
+      "external": [
+        "@folio/base-ui-kit"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "locale",
+    "icon.svg"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.0",
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@folio/base-ui-kit": "workspace:*",
+    "@folio/base-contract": "workspace:*"
+  },
+  "engines": {
+    "dsh": "^0.2.2-rc.5"
+  }
+}

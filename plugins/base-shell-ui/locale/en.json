@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Base shell capability",
+    "description": "Provides the workbench shell: a dismissible full-screen workbench, the workspace bar, pane toggles, floating panels and the status bar; plugins join by registering a workspace or panel on ctx.folioShell."
+  }
+}

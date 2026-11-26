@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Test gallery UI",
+    "description": "Test UI plugin: exercises the masonry gallery and lightbox, consuming @folio/base-ui-kit primitives only."
+  }
+}

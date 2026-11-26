@@ -79,9 +79,9 @@ export function apply(ctx: Context) {
 |---|---|---|
 | **Host 插件包** | 有 `main`/`exports`，代码导出 `apply` | 后端能力 |
 | **Client（UI）插件包** | 有 `dsh.client` + `exports["./client"]` | 浏览器界面 |
-| **双 half 包** | 两者都有 | 前后端各半（LocalFolio 的 `core-*` + `shell-*-ui`） |
+| **双 half 包** | 两者都有 | 前后端各半（LocalFolio 的 `*-host` + `*-ui`） |
 | **纯配置 bundle** | 只有 `dsh.bundle.patch`，行指向别人的包 | 组装已有插件（如接一个 MCP server） |
-| **聚合 bundle** | `dsh.bundle.patch` + 多条 `insert` + `dependencies` 指向自家插件 | 一键装整套（`@folio/bundle-suite-all`） |
+| **聚合 bundle** | `dsh.bundle.patch` + 多条 `insert` + `dependencies` 指向自家插件 | 一键装整套（`@folio/workbench-suite`） |
 | **连接器插件**（`connector` 组，0.2.3） | Host 包 + `dsh.bundle.patch`，注册第三方服务账号 | 接第三方服务：CLI app plugin（`dsh-cli-account` + `dsh-upstream-skills`）或 MCP connector（`dsh-mcp-account`），页面统一由 `dsh-client-ui-connector-account` 承载 |
 
 另有 **agent preset**（`@deepseek-ai/dsh-agent-preset`）：用 Cordis YAML 声明某类会话的能力组合，属于组合层。
@@ -132,7 +132,7 @@ export function apply(ctx: Context) {
 
 ```json
 {
-  "name": "@folio/bundle-suite-all",
+  "name": "@folio/workbench-suite",
   "version": "0.2.0-alpha.0",
   "private": true,
   "type": "module",
@@ -165,9 +165,9 @@ export function apply(ctx: Context) {
 ```yaml
 - insert:
     - id: folio-shell
-      name: '@folio/shell-overlay-ui'
+      name: '@folio/base-shell-ui'
     - id: folio-runtime
-      name: '@folio/core-host-runtime'
+      name: '@folio/base-runtime-host'
       config:
         port: !!js ctx.profileContext?.port ?? 0
     - id: web-search-alt
@@ -241,7 +241,7 @@ export function apply(ctx: Context, config: Config) { /* 已校验、已填默�
 - `PRELOADED_CLIENT_EXTERNALS`（当前为空）与 `STATIC_MODULE_MANIFEST_EXPORT = '__$dsh_client_module_manifest'`：`staticLinked` 库用这个具名导出携带模块清单，其 factory 返回除它以外的导出，`meta` 描述编译后的样式表。
 - 开机即加载（不等其它 client 包）：`dsh-client-modules`、`dsh-api-session-controller`、`dsh-client-ui-renderer`、`dsh-client-ui-layout`、`dsh-client-ui-session`、`dsh-client-ui-chat`、`dsh-client-ui-sidebar`。
 - 解析失败时报 `require("<spec>") missed the module table — not a platform seed word, not a materialized module, and no registered package factory`。
-- **政策口径（本工作区已对齐）**：`references/practices.md` 明确写「不要 `require('@deepseek-ai/dsh-client-ui-primitives')`，也不要加载任何其他 Harness Client 包作为模块；需要控件就照 `src/*.tsx` 与 `*.module.css` 抄一份，类名加自己前缀，只留 `--dsw-alias-*` 令牌」。技术上讲，`primitives` 在冻结表里所以**能跑**，但它是内部包、导出随时会变；一个抛错的组件会让该 Slot entry 整块空白（`slot entry crashed in '<slot>'`）。LocalFolio 已由独立插件 `@folio/core-ui-kit`（基于 Radix UI + `lucide-react` + `.lf-*` 样式）统一提供基础组件与图标，各 UI 插件通过 `dsh.client.external: ['@folio/core-ui-kit']` 单实例复用，客户端产物不再 import 任何 `@deepseek-ai/dsh-client-*`（见 §11.6）。
+- **政策口径（本工作区已对齐）**：`references/practices.md` 明确写「不要 `require('@deepseek-ai/dsh-client-ui-primitives')`，也不要加载任何其他 Harness Client 包作为模块；需要控件就照 `src/*.tsx` 与 `*.module.css` 抄一份，类名加自己前缀，只留 `--dsw-alias-*` 令牌」。技术上讲，`primitives` 在冻结表里所以**能跑**，但它是内部包、导出随时会变；一个抛错的组件会让该 Slot entry 整块空白（`slot entry crashed in '<slot>'`）。LocalFolio 已由独立插件 `@folio/base-ui-kit`（基于 Radix UI + `lucide-react` + `.lf-*` 样式）统一提供基础组件与图标，各 UI 插件通过 `dsh.client.external: ['@folio/base-ui-kit']` 单实例复用，客户端产物不再 import 任何 `@deepseek-ai/dsh-client-*`（见 §11.6）。
 - 打包：上表全部 `external`；客户端产物导出 `./client`，注册 **id 等于包名**的懒工厂；不要 CDN、第二份 React、UMD 查找；`dsh.client.external` 只登记需要 loader 预载的非基线模块。
 
 ---
@@ -1256,21 +1256,22 @@ export function apply(ctx: Context): void {
 
 ### 11.1 命名与目录
 
-`@folio/<大类层>-<功能域>-<细分职责>`：
+`@folio/<角色>-<功能>-<形态>`（工作台 = 整个软件，工作区 = 工作区栏一项完整功能，功能插件 = 工作区内部的一块功能）：
 
-| 前缀 | 含义 | 例子 |
+| 前缀 | 角色 | 例子 |
 |---|---|---|
-| `bundle-*` | 聚合元包 | `@folio/bundle-suite-all` |
-| `core-*` | Host / UI 基础设施增量 | `core-host-storage`（`ctx.folioStorage`）、`core-host-runtime`（`ctx.folioRuntime`，`/lf/*` RPC + SSE）、`core-ui-kit`（`ctx.folioUi`，纯通用 shadcn/Radix + `lucide-react` 组件、无 Preflight Tailwind v4 共享样式、Portal/Toast 宿主） |
-| `shell-*` | 覆盖层外壳 / 设置分页 | `shell-overlay-ui`（`ctx.folioShell`）、`shell-settings-ui` |
-| `app-*` | 业务插件 | `app-starter-host`、`app-starter-ui`、`app-gallery-ui`、`app-sidebar-ui` |
-| `bridge-*` / `ext-*` | 桥接 DSH 工具 / 薄扩展 | 预留 |
-| `lib-*` | 编译期共享契约（不是插件） | `lib-shared-contract` |
+| `base-*` | 工作台通用基础能力 | `base-storage-host`（`ctx.folioStorage`）、`base-runtime-host`（`ctx.folioRuntime`，`/lf/*` RPC + SSE）、`base-ui-kit`（`ctx.folioUi`）、`base-shell-ui`（`ctx.folioShell`）、`base-frame-ui`（`ctx.folioFrame`，四区布局框架，自身不画界面）、`base-settings-ui` |
+| `workspace-*` | 工作区（工作区栏的一项完整功能） | 预留：`workspace-canvas-ui`、`workspace-notes-ui` |
+| `feature-*` | 功能插件（只在一个工作区内部贡献功能） | 预留：`feature-canvas-layers-ui` |
+| `test-*` | 测试界面（只为验证界面与集成方式） | `test-overview-host`、`test-overview-ui`、`test-gallery-ui`、`test-sidebar-ui`、`test-shadcn-admin-ui`、`test-studio-admin-ui` |
+| `bridge-*` | 桥接插件（把基础能力接进外壳 / 工具链 / 测试场景） | `bridge-frame-test-ui`（测试框架工作区） |
+| `workbench-suite` | 工作台套件（聚合元包） | `@folio/workbench-suite` |
+| `base-contract` | 编译期共享契约（不是插件） | `libs/base-contract` |
 
 ### 11.2 Host 侧
 
 ```ts
-export const name = 'core-host-runtime'
+export const name = 'base-runtime-host'
 export const inject = ['folioStorage'] as const
 
 export function apply(ctx: Context): void {
@@ -1280,13 +1281,13 @@ export function apply(ctx: Context): void {
       runtime.dispose()
       disposeProvide()
     }
-  }, 'core-host-runtime: service')
+  }, 'base-runtime-host: service')
 }
 ```
 
 `ctx.provide()` 是 Cordis 提供给插件的公开注册 API（`Service` 基类内部就是调用它）；返回的 disposer 归本插件 effect 所有，插件卸载即撤销服务。另一种等价写法是直接 `export default class extends Service`，但对「工厂造出的普通对象」这种形态，`ctx.provide` 改动最小。
 
-> 类型提示：cordis 把 `provide` 的声明放在 `reflect.d.ts` 里，而包的 `index.d.ts` 没有 re-export 它，所以 TS 里需要像 `libs/lib-shared-contract/src/index.ts` 那样补一份同签名的 `declare module '@deepseek-ai/cordis'` 合并（运行时 `ctx.provide` 一定存在）。
+> 类型提示：cordis 把 `provide` 的声明放在 `reflect.d.ts` 里，而包的 `index.d.ts` 没有 re-export 它，所以 TS 里需要像 `libs/base-contract/src/index.ts` 那样补一份同签名的 `declare module '@deepseek-ai/cordis'` 合并（运行时 `ctx.provide` 一定存在）。
 
 ### 11.3 Client 侧
 
@@ -1300,16 +1301,16 @@ export function apply(ctx: Context): void {
       ctx.slots.register({ name: 'shell.overlay', id: 'folio.shell.overlay', order: 1 }, FolioOverlay),
     )
     return () => { disposeOverlay?.(); disposeService() }
-  }, 'shell-overlay-ui: service + overlay')
+  }, 'base-shell-ui: service + overlay')
 }
 ```
 
-约定：全屏工作台挂 `shell.overlay`（`order: 1`），自由悬浮面板层同 slot（`order: 2`），UI 样式/Portal/Toast 宿主由 `@folio/core-ui-kit` 挂同 slot（`order: 3`）；业务 UI 只调 `ctx.folioShell.registerWorkspace/registerFloatingPanel`；样式只用 `--dsw-alias-*` / `--dsw-font-family`，外壳还要尊重 `--dsh-frame-top-clearance`；控件与图标通过 `dsh.client.external: ['@folio/core-ui-kit']` 从 `@folio/core-ui-kit/client` 单实例引入；快捷键走 `ctx.shortcuts`；Client manifest 必须有 `dsh.client.platform: "web"`，`immediately` 只在确实要启动早期渲染时开，`inject` 只用于排序激活。
+约定：全屏工作台挂 `shell.overlay`（`order: 1`），自由悬浮面板层同 slot（`order: 2`），UI 样式/Portal/Toast 宿主由 `@folio/base-ui-kit` 挂同 slot（`order: 3`）；工作区向 `ctx.folioShell.registerWorkspace` 注册，`MainView` 渲染 `ctx.folioFrame.View` 并调用 `attachHostWorkspace`、设 `hideStatusBar: true`；工作区内部的功能插件只调 `ctx.folioFrame.registerApp` 声明四区内容（左/中/右/底、调宽折叠、持久化与错误隔离均由框架托管）；样式只用 `--dsw-alias-*` / `--dsw-font-family`，外壳还要尊重 `--dsh-frame-top-clearance`；控件与图标通过 `dsh.client.external: ['@folio/base-ui-kit']` 从 `@folio/base-ui-kit/client` 单实例引入；快捷键走 `ctx.shortcuts`；Client manifest 必须有 `dsh.client.platform: "web"`，`immediately` 只在确实要启动早期渲染时开，`inject` 只用于排序激活。
 
 ### 11.4 打包与构建
 
 - 产物：每包 `lib/index.js`（Host）+ `lib/client.js`（Client），`exports` 暴露 `.` 与 `./client`，以及 `./locale/*.json` 与 `./icon`。
-- `scripts/build.mjs` 的 `DSH_CLIENT_EXTERNALS` 与 master `packages/client/web/src/platform.ts` 的 11 个模块对齐（含 `react/jsx-runtime`），并把 `dsh.client.external` 合并进来；每次构建自动跑 `scripts/sync-ui-kit.mjs` 同步 `@folio/core-ui-kit` 的通用组件导出表，并仅对含 `src/tailwind.css` 的 `@folio/core-ui-kit` 编译一份无 Preflight 的 Tailwind v4 样式（`@source "../../";` 自动覆盖所有独立 UI 插件、`@layer base` 严格限定在 `[data-lf-*]` 作用域，`--watch` 下任意 UI 插件重编自动联动刷新）；新增通用 shadcn 原语直接用 `pnpm run ui:add <组件>`；业务插件专属图标可直接按需 import `lucide-react`（无状态 SVG，零跨插件单例问题）。实测 `@folio/core-ui-kit` 仅 require `react` / `react-dom` / `react/jsx-runtime`，其余 UI 插件额外仅 require `@folio/core-ui-kit/client`（均不再 import 任何 `@deepseek-ai/dsh-*`）。
+- `scripts/build.mjs` 的 `DSH_CLIENT_EXTERNALS` 与 master `packages/client/web/src/platform.ts` 的 11 个模块对齐（含 `react/jsx-runtime`），并把 `dsh.client.external` 合并进来；每次构建自动跑 `scripts/sync-ui-kit.mjs` 同步 `@folio/base-ui-kit` 的通用组件导出表，并仅对含 `src/tailwind.css` 的 `@folio/base-ui-kit` 编译一份无 Preflight 的 Tailwind v4 样式（`@source "../../";` 自动覆盖所有独立 UI 插件、`@layer base` 严格限定在 `[data-lf-*]` 作用域，`--watch` 下任意 UI 插件重编自动联动刷新）；新增通用 shadcn 原语直接用 `pnpm run ui:add <组件>`；插件专属图标可直接按需 import `lucide-react`（无状态 SVG，零跨插件单例问题）。实测 `@folio/base-ui-kit` 仅 require `react` / `react-dom` / `react/jsx-runtime`，其余 UI 插件额外仅 require `@folio/base-ui-kit/client`（均不再 import 任何 `@deepseek-ai/dsh-*`）。
 - `react`、`cordis` 在 `peerDependencies`；需要与宿主共享实例的 DSH 包 peer+dev 双声明。
 - 每个包都声明 `engines.dsh`（当前 `^0.2.2-rc.5`），`locale/{zh,en}.json` 提供 `meta.title/description`，`icon.svg` 为原创图标。
 - 校验：`pnpm run verify`（typecheck → build → check-artifacts → vitest）。
@@ -1324,19 +1325,19 @@ export function apply(ctx: Context): void {
 |---|---|---|
 | 1 | 7 个包都没有 `engines.dsh` | bundle 与 9 个插件都声明 `"engines": { "dsh": "^0.2.2-rc.5" }`（预发布后缀原样保留，见 §2.5） |
 | 2 | bundle 只有 `icon.svg`，没有 `locale/*.json` | bundle 与 9 个插件都有 `locale/zh.json` + `locale/en.json` 的 `meta.title/description`，bundle 另带 `meta.detail: docs/DETAIL.md`；`exports`/`files` 同步导出 `./locale/*.json` 与 `./icon` |
-| 3 | Client 插件直接 import `@deepseek-ai/dsh-client-ui-primitives` | 抽离纯通用底座插件 `@folio/core-ui-kit`（shadcn/Radix + `lucide-react` + 无 Preflight Tailwind v4 + `shell.overlay` Portal/Toast 宿主），其余 UI 插件（含独立测试插件 `app-gallery-ui`、`app-sidebar-ui`）通过 `dsh.client.external` 单实例复用；客户端产物不再 require 任何 `@deepseek-ai/dsh-client-*` |
-| 4 | 服务用 `ctx.reflect.provide` 暴露 | 四处服务（`folioStorage` / `folioRuntime` / `folioUi` / `folioShell`）均用公开的 `ctx.provide()`；在 `libs/lib-shared-contract/src/index.ts` 补齐 cordis 未 re-export 的 `provide`/`get` 类型声明 |
+| 3 | Client 插件直接 import `@deepseek-ai/dsh-client-ui-primitives` | 抽离纯通用底座插件 `@folio/base-ui-kit`（shadcn/Radix + `lucide-react` + 无 Preflight Tailwind v4 + `shell.overlay` Portal/Toast 宿主），其余 UI 插件（含独立测试插件 `test-gallery-ui`、`test-sidebar-ui`）通过 `dsh.client.external` 单实例复用；客户端产物不再 require 任何 `@deepseek-ai/dsh-client-*` |
+| 4 | 服务用 `ctx.reflect.provide` 暴露 | 四处服务（`folioStorage` / `folioRuntime` / `folioUi` / `folioShell`）均用公开的 `ctx.provide()`；在 `libs/base-contract/src/index.ts` 补齐 cordis 未 re-export 的 `provide`/`get` 类型声明 |
 
-图标分工：每个插件包及 bundle 根目录下保留 64×64 静态 `icon.svg`（深底 + `#60a5fa` 线稿 + `#34d399` 点缀，≤256 KiB），供 DSH 插件管理页在不加载 JS 时静态展示；工作台运行期界面内的按钮/菜单图标统一从 `@folio/core-ui-kit/client`（`lucide-react`）引入。
+图标分工：每个插件包及 bundle 根目录下保留 64×64 静态 `icon.svg`（深底 + `#60a5fa` 线稿 + `#34d399` 点缀，≤256 KiB），供 DSH 插件管理页在不加载 JS 时静态展示；工作台运行期界面内的按钮/菜单图标统一从 `@folio/base-ui-kit/client`（`lucide-react`）引入。
 
-### 11.7 新增一个业务插件（七步）
+### 11.7 新增一个工作区（七步）
 
 1. 在 §7 找同类、在 §4 找 seam —— 能复用就只写薄封装。
-2. `plugins/app-xxx-storage`：`inject: ['folioRuntime','folioStorage']`，用 `ctx.folioStorage.forPlugin('app-xxx-storage')` 取目录，`ctx.folioRuntime.registerAction` 注册动作，全部包在 `ctx.effect`。
-3. `plugins/app-xxx-ui`：`dsh.client.inject: ['@folio/core-ui-kit', '@folio/shell-overlay-ui']`、`dsh.client.external: ['@folio/core-ui-kit']`、`inject: ['folioShell','slots']`，只调 `registerWorkspace` / `registerFloatingPanel`。
+2. `plugins/feature-xxx-host`：`inject: ['folioRuntime','folioStorage']`，用 `ctx.folioStorage.forPlugin('feature-xxx-host')` 取目录，`ctx.folioRuntime.registerAction` 注册动作，全部包在 `ctx.effect`。
+3. `plugins/workspace-xxx-ui`：`dsh.client.inject: ['@folio/base-ui-kit', '@folio/base-shell-ui', '@folio/base-frame-ui']`、`dsh.client.external: ['@folio/base-ui-kit']`、`inject: ['folioFrame', 'folioShell']`；向 `ctx.folioShell.registerWorkspace` 注册工作区，`MainView` 渲染 `ctx.folioFrame.View` 并调用 `attachHostWorkspace(workspaceId)`，同时设 `hideStatusBar: true`。工作区内部的功能插件只 `inject: ['folioFrame']`，用 `registerApp({ id, title, Left, Main, Right, Status })` 声明四个区域。
 4. 需要模型能力再加 `bridge-*`：`ctx.tools.register()`，工具名避开 §9。
-5. 两个包的 `package.json` + 图标 + `locale/zh.json`（+ 可选 `meta.detail`），补 `engines.dsh`。
-6. 在 `bundles/bundle-suite-all/package.json` 与 `cordis.patch.yml` 各加一行。
+5. 各包的 `package.json` + 图标 + `locale/zh.json`（+ 可选 `meta.detail`），补 `engines.dsh`。
+6. 在 `bundles/workbench-suite/package.json` 与 `cordis.patch.yml` 各加一行。
 7. `pnpm install --offline && pnpm run verify`；用 `scripts/lfdev.ps1` 在隔离 profile 实测后再进日常 profile。
 
 ---
@@ -1351,7 +1352,7 @@ export function apply(ctx: Context): void {
 | 插件一直 pending | `inject` 的服务在 profile 里不存在 | 改 `ctx.inject([...])` 或补提供方 |
 | 激活直接失败 | 向未声明 slot 注册 / 抢了别人的 cell | `ctx.slots.inject()` 等声明；增量用新 id |
 | UI 整块空白 | Slot entry 抛错 | 查控制台 `slot entry crashed`；确认没 import 冻结表外的包 |
-| 改了代码页面没变 | 只重编 Host；改了被 `external` 的 `core-ui-kit` 未刷新页面；或新增插件未重组 | 改业务 UI 开 `build:watch` 自动局部 HMR；改 `core-ui-kit` 浏览器按 `F5`；新增插件/改 manifest/改 `host.ts` 需 `set_plugin(enabled:true)` 重组或重启 DSH |
+| 改了代码页面没变 | 只重编 Host；改了被 `external` 的 `base-ui-kit` 未刷新页面；或新增插件未重组 | 改业务 UI 开 `build:watch` 自动局部 HMR；改 `base-ui-kit` 浏览器按 `F5`；新增插件/改 manifest/改 `host.ts` 需 `set_plugin(enabled:true)` 重组或重启 DSH |
 | shadcn 下拉/弹层在 React 18 不弹出或透底 | 触发器缺少 `React.forwardRef` 丢 `ref`；弹层缺 `pointer-events-auto`；或 `--popover` 映射了半透明令牌 | `asChild` 目标组件用 `forwardRef`；Portal 接 `usePortalContainer()` 且内容加 `pointer-events-auto`；`--popover`/`--card` 映射不透明 `--dsw-alias-bg-base`；全屏弹层顶部避让 `--dsh-frame-top-clearance` |
 | 升级后被拒装 | `engines.dsh` 不匹配（注意预发布后缀） | 按 §2.5 写法放宽范围；看 `incompatible-version` 的 `requirements` |
 | git 安装后加载失败 | 拿到源码但没跑 `build`/`prepare` | 包提供自包含 `prepare`；用户侧 profile `pnpm-workspace.yaml` 加 `allowBuilds` |

@@ -37,3 +37,7 @@ Engineering skills 探索 codebase 时，应如何消费这个 repo 的 domain d
 如果你的输出与现有 ADR 矛盾，明确指出，而不是静默覆盖：
 
 > _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
+
+## 词表与代码的对齐
+
+`工作台 / 工作区 / 功能插件 / 基础能力 / 测试界面 / 桥接` 已经同时在文档与代码里生效：包名前缀是 `base-* / workspace-* / feature-* / test-* / bridge-*`，工作区由 `ctx.folioShell.registerWorkspace` 注册，框架内的四区视图由 `ctx.folioFrame.registerApp` 登记。新增术语前先确认它真的属于这套层级，而不是同一个东西的第二个名字。

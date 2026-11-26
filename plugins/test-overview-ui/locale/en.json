@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Test overview UI",
+    "description": "Test UI plugin: registers a workspace and a floating panel on ctx.folioShell to exercise the base primitives and host theme tokens."
+  }
+}

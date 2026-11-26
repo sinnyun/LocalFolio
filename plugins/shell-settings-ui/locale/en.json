@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "My plugins settings",
-    "description": "Adds a My plugins section to DSH settings that shows installed DSH plugins and LocalFolio extensions in two layers, with enable switches plus the storage and services each one occupies."
-  }
-}

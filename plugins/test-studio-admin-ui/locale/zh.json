@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "测试 Studio Admin UI",
+    "description": "测试用 UI 插件：把 Studio Admin 后台界面移植进工作台，验证多主题预设与布局控制。",
+    "detail": "docs/DETAIL.md"
+  }
+}

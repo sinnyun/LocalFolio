@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "测试概览 UI",
+    "description": "测试用 UI 插件：向 ctx.folioShell 注册一个工作区和一个悬浮面板，验证基础组件与主题令牌的接入方式。"
+  }
+}

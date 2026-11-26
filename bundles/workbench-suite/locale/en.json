@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Workbench suite",
+    "description": "Installs the whole workbench at once: base capabilities (storage, runtime, UI kit, shell, layout frame, settings page), test surfaces and the bridge plugin. The workbench covers the native DSH UI without taking it over; Esc or Return to DSH goes back. Data is written only under %LOCALAPPDATA%/LocalFolio."
+  }
+}

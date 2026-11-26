@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Base UI kit",
+    "description": "Provides runtime-shared UI primitives (Radix UI + lucide-react), scoped host-token styles, the shell.overlay portal host and the toast service (ctx.folioUi) for every workbench UI plugin."
+  }
+}

@@ -1,7 +1,0 @@
-{
-  "meta": {
-    "title": "LocalFolio workbench suite",
-    "description": "Installs the LocalFolio incremental plugins in one go: per-plugin isolated storage, the /lf RPC and SSE gateway, the full-screen workbench with floating panels, and the My plugins section in DSH settings. The workbench layers over the native DSH UI without taking it over — Esc or Back to DSH returns you there — and writes only under %LOCALAPPDATA%/LocalFolio, never into DSH storage or session folders.",
-    "detail": "docs/DETAIL.md"
-  }
-}

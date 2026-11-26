@@ -1,0 +1,45 @@
+{
+  "name": "@folio/base-frame-ui",
+  "version": "0.3.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "description": "LocalFolio base layout frame (ctx.folioFrame): owns left/center/right/status regions, resizable + collapsible panes, persisted geometry and keyboard shortcuts. It draws nothing by itself; a workspace renders folioFrame.View and attaches itself as the host.",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@folio/base-ui-kit",
+        "@folio/base-shell-ui"
+      ],
+      "external": [
+        "@folio/base-ui-kit"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "locale",
+    "icon.svg",
+    "docs"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.0",
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@folio/base-ui-kit": "workspace:*",
+    "@folio/base-contract": "workspace:*"
+  },
+  "engines": {
+    "dsh": "^0.2.2-rc.5"
+  }
+}

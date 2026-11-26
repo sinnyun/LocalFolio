@@ -1,0 +1,146 @@
+/*
+ * Preflight-free Tailwind v4 stylesheet for `@folio/base-ui-kit`.
+ *
+ * Intentionally omits `tailwindcss/preflight.css` so DSH's native UI is never
+ * affected by global resets. Only theme tokens and utilities used under
+ * `plugins/base-ui-kit/src/` are emitted.
+ */
+@import "tailwindcss/theme.css";
+@import "tailwindcss/utilities.css";
+/*
+ ---break---
+ */
+@custom-variant dark (&:is(.dark *));
+@source "./";
+@source "../../";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* Map shadcn CSS variables strictly inside LocalFolio surfaces onto DSH host tokens. */
+[data-lf-shell],
+[data-lf-floating-host],
+[data-lf-ui-host],
+[data-lf-my-plugins-section] {
+  --background: var(--dsw-alias-bg-base, #ffffff);
+  --foreground: var(--dsw-alias-label-primary, #1b1b1c);
+  --card: var(--dsw-alias-bg-base, #ffffff);
+  --card-foreground: var(--dsw-alias-label-primary, #1b1b1c);
+  --popover: var(--dsw-alias-bg-base, #ffffff);
+  --popover-foreground: var(--dsw-alias-label-primary, #1b1b1c);
+  --primary: var(--dsw-alias-brand-primary, #1b1b1c);
+  --primary-foreground: var(--dsw-alias-label-primary-foreground, #ffffff);
+  --secondary: var(--dsw-alias-interactive-bg-hover-solid, #f1f3f5);
+  --secondary-foreground: var(--dsw-alias-label-primary, #1b1b1c);
+  --muted: var(--dsw-alias-interactive-bg-hover-solid, #f1f3f5);
+  --muted-foreground: var(--dsw-alias-label-secondary, #61666b);
+  --accent: var(--dsw-alias-interactive-bg-hover-solid, #f1f3f5);
+  --accent-foreground: var(--dsw-alias-label-primary, #1b1b1c);
+  --destructive: var(--dsw-alias-danger-primary, #d92d20);
+  --destructive-foreground: var(--dsw-alias-label-primary-foreground, #ffffff);
+  --border: var(--dsw-alias-border-l3, rgba(15, 23, 42, 0.14));
+  --input: var(--dsw-alias-border-l3, rgba(15, 23, 42, 0.14));
+  --ring: var(--dsw-alias-brand-primary, #1b1b1c);
+  --chart-1: var(--dsw-alias-chart-1, oklch(0.87 0 0));
+  --chart-2: var(--dsw-alias-chart-2, oklch(0.556 0 0));
+  --chart-3: var(--dsw-alias-chart-3, oklch(0.439 0 0));
+  --chart-4: var(--dsw-alias-chart-4, oklch(0.371 0 0));
+  --chart-5: var(--dsw-alias-chart-5, oklch(0.269 0 0));
+  --radius: var(--dsw-radius-md, 0.625rem);
+  --sidebar: var(--dsw-specific-sidebar-fill, #f9fafb);
+  --sidebar-foreground: var(--dsw-alias-label-primary, #1b1b1c);
+  --sidebar-primary: var(--dsw-alias-brand-primary, #1b1b1c);
+  --sidebar-primary-foreground: var(--dsw-alias-label-primary-foreground, #ffffff);
+  --sidebar-accent: var(--dsw-alias-interactive-bg-hover-solid, #f1f3f5);
+  --sidebar-accent-foreground: var(--dsw-alias-label-primary, #1b1b1c);
+  --sidebar-border: var(--dsw-alias-border-l3, rgba(15, 23, 42, 0.14));
+  --sidebar-ring: var(--dsw-alias-brand-primary, #1b1b1c);
+}
+
+/* Scoped base reset ONLY inside LocalFolio containers (safe @layer base replacement for preflight). */
+@layer base {
+  [data-lf-shell] *,
+  [data-lf-floating-host] *,
+  [data-lf-ui-host] *,
+  [data-lf-my-plugins-section] * {
+    box-sizing: border-box;
+    border: 0 solid var(--border);
+  }
+  [data-lf-shell] button,
+  [data-lf-floating-host] button,
+  [data-lf-ui-host] button,
+  [data-lf-my-plugins-section] button,
+  [data-lf-shell] input,
+  [data-lf-floating-host] input,
+  [data-lf-ui-host] input,
+  [data-lf-shell] textarea,
+  [data-lf-floating-host] textarea,
+  [data-lf-ui-host] textarea {
+    font: inherit;
+    color: inherit;
+    background-color: transparent;
+  }
+  [data-lf-shell] ul,
+  [data-lf-shell] ol,
+  [data-lf-floating-host] ul,
+  [data-lf-floating-host] ol,
+  [data-lf-ui-host] ul,
+  [data-lf-ui-host] ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  [data-lf-shell] h1,
+  [data-lf-shell] h2,
+  [data-lf-shell] h3,
+  [data-lf-shell] h4,
+  [data-lf-shell] p,
+  [data-lf-floating-host] h1,
+  [data-lf-floating-host] h2,
+  [data-lf-floating-host] h3,
+  [data-lf-floating-host] p {
+    margin: 0;
+  }
+  [data-lf-shell] a,
+  [data-lf-floating-host] a,
+  [data-lf-ui-host] a {
+    color: inherit;
+    text-decoration: inherit;
+  }
+}

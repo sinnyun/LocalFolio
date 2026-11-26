@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "Overview UI sample",
-    "description": "Sample standalone Client plugin: registers a workspace and a floating panel on ctx.folioShell and shows how to build UI with LocalFolio local atoms and host theme tokens."
-  }
-}

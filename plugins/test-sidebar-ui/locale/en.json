@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Test sidebar UI",
+    "description": "Test UI plugin: exercises the icon-collapsible sidebar, breadcrumbs and nested menus, consuming @folio/base-ui-kit primitives only."
+  }
+}

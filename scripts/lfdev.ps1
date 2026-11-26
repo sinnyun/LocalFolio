@@ -1,11 +1,15 @@
-# LocalFolio Monorepo 隔离验证脚本（默认 profile: lfdev，端口: 3081）。
-# 通过安装聚合元包 `bundles/bundle-suite-all` 一次性装配整套独立 DSH 插件。
+# LocalFolio 工作台套件的 profile 安装 / 实例验证脚本（默认 profile: lfdev，端口: 3081）。
+# 通过安装聚合元包 `bundles/workbench-suite` 一次性装配整套独立 DSH 插件。
 #
-#   pwsh -File scripts\lfdev.ps1 install     # 将 @folio/bundle-suite-all 以 link: 装入 lfdev
-#   pwsh -File scripts\lfdev.ps1 restart     # 重启实例并立即返回
-#   pwsh -File scripts\lfdev.ps1 url         # 读取实例地址
-#   pwsh -File scripts\lfdev.ps1 verify      # 校验 boot payload 包含所有 client 插件
-#   pwsh -File scripts\lfdev.ps1 stop        # 停止实例
+#   pwsh -File scripts\lfdev.ps1 install [-Profile <name>]   # link: 装入指定 profile，并清理指向旧路径的悬空 bundle
+#   pwsh -File scripts\lfdev.ps1 restart [-Port <port>]      # 重启实例并立即返回
+#   pwsh -File scripts\lfdev.ps1 url                        # 读取实例地址
+#   pwsh -File scripts\lfdev.ps1 verify                     # 校验 boot payload 包含所有 client 插件
+#   pwsh -File scripts\lfdev.ps1 stop                       # 停止实例
+#
+# `desktop` profile 由 Electron 应用独占，CLI 会拒绝（"managed exclusively by the
+# Electron application"）；桌面版请在应用内的插件管理里添加依赖：
+#   link:F:\AI\geren\LocalFolio\bundles\workbench-suite
 
 param(
   [ValidateSet('install', 'restart', 'url', 'stop', 'verify', 'all')]
@@ -17,7 +21,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$SuiteDir = Join-Path $RepoRoot 'bundles\bundle-suite-all'
+$SuiteDir = Join-Path $RepoRoot 'bundles\workbench-suite'
 $Exe = if ($env:DSH_EXE) { $env:DSH_EXE } else { 'D:\deepseekharness\DeepSeek Harness.exe' }
 $Bin = if ($env:DSH_BIN) { $env:DSH_BIN } else { 'D:\deepseekharness\resources\app.asar\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js' }
 
@@ -30,14 +34,16 @@ $OutLog = Join-Path $StateDir "dsh-$Stamp.out.log"
 $ErrLog = Join-Path $StateDir "dsh-$Stamp.err.log"
 
 $ExpectedClientPlugins = @(
-  '@folio/core-ui-kit',
-  '@folio/shell-overlay-ui',
-  '@folio/shell-settings-ui',
-  '@folio/app-starter-ui',
-  '@folio/app-gallery-ui',
-  '@folio/app-sidebar-ui',
-  '@folio/app-admin-ui',
-  '@folio/app-studio-ui'
+  '@folio/base-ui-kit',
+  '@folio/base-shell-ui',
+  '@folio/base-settings-ui',
+  '@folio/test-overview-ui',
+  '@folio/test-gallery-ui',
+  '@folio/test-sidebar-ui',
+  '@folio/test-shadcn-admin-ui',
+  '@folio/test-studio-admin-ui',
+  '@folio/base-frame-ui',
+  '@folio/bridge-frame-test-ui'
 )
 
 function Invoke-Dsh {
@@ -93,22 +99,62 @@ function Ensure-WebAppBundle {
   Write-Host "added @deepseek-ai/dsh-web-app to profile $Profile"
 }
 
-function Install-Bundle {
-  # Remove legacy single-bundle package if present in this profile
+function Prune-StaleBundles {
+  # A renamed or deleted suite leaves a dangling `dsh.profile.bundles` entry, and
+  # `dsh plugin` reconciles that list before it can remove anything itself, so the
+  # entry has to go from package.json first.
   $manifest = Join-Path $env:USERPROFILE ".dsh\profiles\$Profile\package.json"
-  if (Test-Path $manifest) {
-    $doc = Get-Content $manifest -Raw | ConvertFrom-Json
-    if ($doc.dsh.profile.bundles -contains '@local/localfolio') {
-      Write-Host "removing legacy @local/localfolio from profile $Profile"
-      $null = Invoke-Dsh @('plugin', '--profile', $Profile, 'remove', '@local/localfolio')
+  if (-not (Test-Path $manifest)) { return }
+
+  $suiteName = '@folio/workbench-suite'
+  $doc = Get-Content $manifest -Raw | ConvertFrom-Json
+  if (-not $doc.dependencies) { return }
+
+  $stale = @()
+  foreach ($prop in @($doc.dependencies.PSObject.Properties)) {
+    if ($prop.Name -eq $suiteName) { continue }
+    $spec = [string]$prop.Value
+    $target = if ($spec -like 'link:*') { $spec.Substring(5) -replace '/', '\' } else { $null }
+    $pointsHere = $target -and $target -like "*$RepoRoot*"
+    $missing = $target -and -not (Test-Path $target)
+    if (($prop.Name -like '@folio/*' -or $prop.Name -like '@local/*') -and ($pointsHere -or $missing)) {
+      $stale += $prop.Name
     }
   }
+
+  if ($stale.Count -eq 0) { return }
+  Write-Host "pruning stale profile bundles: $($stale -join ', ')"
+  foreach ($name in $stale) { $doc.dependencies.PSObject.Properties.Remove($name) }
+  $doc.dsh.profile.bundles = @($doc.dsh.profile.bundles | Where-Object { $stale -notcontains $_ })
+  ($doc | ConvertTo-Json -Depth 12) + "`n" | Set-Content -Path $manifest -Encoding utf8NoBOM
+}
+
+function Ensure-SuiteBundleEntry {
+  # `dsh plugin add` installs the dependency but leaves `dsh.profile.bundles`
+  # alone when the package is already listed in dependencies, so the boot loader
+  # would never see the suite; keep the bundle list authoritative.
+  $manifest = Join-Path $env:USERPROFILE ".dsh\profiles\$Profile\package.json"
+  if (-not (Test-Path $manifest)) { return }
+
+  $suiteName = '@folio/workbench-suite'
+  $doc = Get-Content $manifest -Raw | ConvertFrom-Json
+  $bundles = @($doc.dsh.profile.bundles)
+  if ($bundles -contains $suiteName) { return }
+
+  Write-Host "enabling $suiteName in profile $Profile"
+  $doc.dsh.profile.bundles = @($bundles + $suiteName)
+  ($doc | ConvertTo-Json -Depth 12) + "`n" | Set-Content -Path $manifest -Encoding utf8NoBOM
+}
+
+function Install-Bundle {
+  Prune-StaleBundles
 
   $spec = "link:$SuiteDir"
   Write-Host "installing $spec into profile $Profile"
   $r = Invoke-Dsh @('plugin', '--profile', $Profile, 'add', $spec)
   if ($r.Out) { $r.Out.Trim() | Select-Object -Last 8 | ForEach-Object { Write-Host "  $_" } }
   if ($r.Code -ne 0) { if ($r.Err) { Write-Host $r.Err }; throw "install exited $($r.Code)" }
+  Ensure-SuiteBundleEntry
   Ensure-WebAppBundle
 }
 

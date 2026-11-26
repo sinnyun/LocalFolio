@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "基础布局框架",
+    "description": "各工作区共用的四区布局框架：左 / 中 / 右 / 底由框架托管，工作区只声明区域内容；框架自身不画界面、不注册工作区，由宿主工作区渲染 folioFrame.View。",
+    "detail": "docs/DETAIL.md"
+  }
+}

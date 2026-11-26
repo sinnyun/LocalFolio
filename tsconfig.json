@@ -14,7 +14,7 @@
     "esModuleInterop": true,
     "types": ["node"],
     "paths": {
-      "@/*": ["./plugins/core-ui-kit/src/*"]
+      "@/*": ["./plugins/base-ui-kit/src/*"]
     }
   },
   "include": [

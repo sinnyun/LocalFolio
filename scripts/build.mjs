@@ -4,7 +4,7 @@
  *
  * Everything builds natively against DSH's frozen browser PLATFORM_MODULES:
  *   react, react-dom, @deepseek-ai/cordis, zod, @tanstack/react-virtual.
- * Shared UI components live in the standalone `@folio/core-ui-kit` plugin
+ * Shared UI components live in the standalone `@folio/base-ui-kit` plugin
  * (Radix UI + lucide-react + `.lf-*` theme tokens) and are consumed by other
  * UI plugins via `dsh.client.external` with zero duplication.
  * No Shadow DOM wall, no per-plugin Tailwind compilation, tiny plugin bundles.
@@ -180,7 +180,7 @@ if (plugins.length === 0) {
   process.exit(1)
 }
 
-// Keep @folio/core-ui-kit barrel exports in sync before building
+// Keep @folio/base-ui-kit barrel exports in sync before building
 execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'sync-ui-kit.mjs')], {
   cwd: repoRoot,
   stdio: 'pipe',
@@ -210,7 +210,7 @@ for (const plugin of plugins) {
       const ctx = await esbuild.context(
         clientOptions(plugin, () => {
           console.log(`[${new Date().toLocaleTimeString()}] rebuilt ${plugin.name} -> lib/client.js`)
-          // When any business/shell UI plugin rebuilds, refresh the shared Tailwind stylesheet in core-ui-kit
+          // When any business/shell UI plugin rebuilds, refresh the shared Tailwind stylesheet in base-ui-kit
           if (!plugin.hasTailwind && tailwindOwnerCtx) {
             void tailwindOwnerCtx.rebuild()
           }

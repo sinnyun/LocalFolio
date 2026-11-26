@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "概览界面样板",
-    "description": "独立 Client 业务插件样板：向 ctx.folioShell 注册一个工作区和一个悬浮面板，演示如何用 LocalFolio 本地 UI 原语与主题令牌构建界面。"
-  }
-}

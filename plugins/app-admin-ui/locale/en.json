@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "Shadcn Admin Console",
-    "description": "satnaing/shadcn-admin ported into a LocalFolio workspace: collapsible icon sidebar, command search, theme switch, dashboard charts, tasks and users data tables, app integrations, chats inbox and settings pages, all built on @folio/core-ui-kit primitives and DSH theme tokens."
-  }
-}

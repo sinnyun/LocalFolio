@@ -1,0 +1,46 @@
+{
+  "name": "@folio/bridge-frame-test-ui",
+  "version": "0.3.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "description": "Bridge test workspace that mounts the base layout frame (@folio/base-frame-ui) in the workbench workspace bar, so the frame can be inspected and adjusted while no real workspace hosts it yet.",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@folio/base-ui-kit",
+        "@folio/base-shell-ui",
+        "@folio/base-frame-ui"
+      ],
+      "external": [
+        "@folio/base-ui-kit"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "locale",
+    "icon.svg",
+    "docs"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.0",
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@folio/base-contract": "workspace:*",
+    "@folio/base-ui-kit": "workspace:*"
+  },
+  "engines": {
+    "dsh": "^0.2.2-rc.5"
+  }
+}

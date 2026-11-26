@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "Studio Admin Console",
-    "description": "Studio Admin (arhamkhnz/next-shadcn-admin-dashboard) ported into a LocalFolio workspace: collapsible icon sidebar with sidebar/floating/inset variants, ⌘J command search, four theme presets, layout preference controls, dashboard charts and a customer data table, all reusing @folio/core-ui-kit primitives and DSH theme tokens."
-  }
-}

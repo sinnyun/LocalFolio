@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Helper: `pnpm run ui:add <component-or-url>`
- * Runs `npx shadcn@latest add` inside `plugins/core-ui-kit` and immediately
+ * Runs `npx shadcn@latest add` inside `plugins/base-ui-kit` and immediately
  * runs `scripts/sync-ui-kit.mjs` to fix imports, strip global CSS, and update
  * barrel exports automatically.
  */
@@ -10,7 +10,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const uiKitDir = path.join(repoRoot, 'plugins', 'core-ui-kit')
+const uiKitDir = path.join(repoRoot, 'plugins', 'base-ui-kit')
 const targets = process.argv.slice(2)
 
 if (targets.length === 0) {

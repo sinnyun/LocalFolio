@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Automates `@folio/core-ui-kit` maintenance after `shadcn add`:
+ * Automates `@folio/base-ui-kit` maintenance after `shadcn add`:
  * 1. Rewrites bare `from "cn"` imports in `src/components/ui/*.tsx` to `from "@/lib/utils"`.
  * 2. Strips any global `:root` / `.dark` blocks appended by shadcn CLI to `src/tailwind.css`.
- * 3. Removes accidental `"cn"` runtime dependency from `plugins/core-ui-kit/package.json`.
+ * 3. Removes accidental `"cn"` runtime dependency from `plugins/base-ui-kit/package.json`.
  * 4. Auto-generates `src/ui-exports.generated.ts` re-exporting every file under
  *    `src/components/ui/*.tsx` and `src/hooks/*.ts`, so adding a shadcn primitive
  *    never requires manually editing `src/client.tsx`.
@@ -13,7 +13,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const uiKitDir = path.join(repoRoot, 'plugins', 'core-ui-kit')
+const uiKitDir = path.join(repoRoot, 'plugins', 'base-ui-kit')
 const uiDir = path.join(uiKitDir, 'src', 'components', 'ui')
 const hooksDir = path.join(uiKitDir, 'src', 'hooks')
 const tailwindCssPath = path.join(uiKitDir, 'src', 'tailwind.css')
@@ -44,7 +44,7 @@ if (fs.existsSync(tailwindCssPath)) {
   }
 }
 
-// Keep core-ui-kit runtime dependencies empty (all UI deps are bundled into lib/client.js)
+// Keep base-ui-kit runtime dependencies empty (all UI deps are bundled into lib/client.js)
 if (fs.existsSync(pkgPath)) {
   const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
   if (pkg.dependencies && Object.keys(pkg.dependencies).length > 0) {

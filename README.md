@@ -214,6 +214,17 @@ git push origin "refs/tags/$tag"
 
 [发布工作流](.github/workflows/release-workbench.yml) 由标签推送触发。它在 Ubuntu 上按锁文件安装依赖、构建并测试、在临时 DSH profile 试装，成功后把 `localfolio-workbench.tgz` 上传到该标签的 Release。到 [Actions](https://github.com/sinnyun/LocalFolio/actions) 确认结果，再从 Release 复制附件地址，放进一个干净的 DSH profile 验证安装和启动。每次发布使用新的版本号和标签。
 
+上面的手动步骤也收进了仓库根目录的 `release.bat`：自动递增版本、改写两个 `package.json`、把 `CHANGELOG.md` 顶部的 `## Unreleased` 改成新版本、跑 `pnpm run verify`、提交打标签推送，并等待 Actions 结束后打印 Release 与附件地址。
+
+```powershell
+release.bat --dry-run          # 只做预检并打印计划，不改任何文件
+release.bat                    # 版本尾号自动 +1
+release.bat 0.3.0-alpha.13     # 指定版本
+release.bat --skip-verify      # 跳过本地 verify（CI 仍会跑）
+```
+
+脚本输出只用 ASCII，避免 `cmd.exe` 代码页乱码；`RELEASE_MSG` 环境变量可覆盖默认提交信息。发布前先在 `CHANGELOG.md` 顶部写好 `## Unreleased` 与本次条目。
+
 <a id="add-workspace"></a>
 
 ### 4. 如何新增一个工作区

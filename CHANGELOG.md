@@ -6,6 +6,12 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 ---
 
+## Unreleased
+
+- 新增 `release.bat` 一键发布脚本：自动递增版本、同步根 `package.json` 与 `bundles/workbench-suite/package.json`、把本段的 `## Unreleased` 改成新版本、跑 `pnpm run verify`、提交打标签推送，并等待 GitHub Actions 结束后打印 Release 与安装包直链。脚本只输出 ASCII，避免 `cmd.exe` 代码页乱码；`--dry-run` 可先看计划，`RELEASE_MSG` 可覆盖默认提交信息。
+
+---
+
 ## 0.3.0-alpha.11
 
 - 中间文件视图统一到 `@folio/base-collection-ui` 的 `CollectionBrowser`：文件浏览器与项目库现在共用同一套工具栏（关键词筛选、类型/分类筛选、分组方式、排序依据 + 升降序、卡片尺寸、视图切换、折叠全部分组）和同一套布局引擎，两侧的差别只剩卡片内容与各自的数据能力（文件浏览器的星级/隐藏文件、项目库的项目级操作）。

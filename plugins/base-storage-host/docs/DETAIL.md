@@ -1,6 +1,6 @@
 # @folio/base-storage-host · 基础存储能力
 
-工作台通用基础能力。它为每个 `@folio` 插件分配互不可见的持久化目录（`%LOCALAPPDATA%\LocalFolio\plugins\<插件>\{data,cache}`），并提供带 Zod 校验的 JSON Store；底层优先走 DSH 的文件系统能力（`dsh-ctx-fs`），不可用时退回本机原子写（`local-node-fs`）。它注册 Host 侧 Cordis 服务 `ctx.folioStorage`，没有 Client 侧产物（`package.json` 中无 `dsh.client`）。
+工作台通用基础能力。它为每个 `@folio` 插件分配互不可见的持久化目录（`%LOCALAPPDATA%\LocalFolio\plugins\<插件>\{data,cache}`），并提供带 Zod 校验的 JSON Store；插件自身存储直接使用本机原子写（`local-node-fs`），不受 DSH 会话沙箱（`workspace-write` / `read-only`）策略限制，同时保留 `createFsSeam(ctx)` 适配器供需要接入 DSH `ctx.fs` 的场景调用。它注册 Host 侧 Cordis 服务 `ctx.folioStorage`，没有 Client 侧产物（`package.json` 中无 `dsh.client`）。
 
 数据只落在 LocalFolio 自己的根目录下，绝不写 DSH 的 `~/.dsh/storages/workspace.json` 或会话目录。
 

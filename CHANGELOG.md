@@ -6,6 +6,10 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 ---
 
+## 0.3.0-alpha.3
+
+- 修复 DSH 在默认 `workspace-write` 沙箱模式下启用工作台时，`base-storage-host` 经由 `ctx.fs` 写入 `%LOCALAPPDATA%\LocalFolio\...` 被拒绝（`file access denied under workspace-write mode`）的问题：插件自有存储统一使用本机原子写（`local-node-fs`），不再受会话 Agent 沙箱策略限制。
+
 ## 0.3.0-alpha.2
 
 - GitHub Actions 随版本标签构建、校验并发布 `localfolio-workbench.tgz`。已验证 Windows DSH `0.2.2-rc.5` 能从 GitHub 附件地址安装并启动工作台。[发布记录](https://github.com/sinnyun/LocalFolio/releases/tag/v0.3.0-alpha.2)
@@ -70,6 +74,6 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 | 包 | 版本 |
 |---|---|
-| `localfolio-monorepo`（根）、`@folio/workbench-suite` | `0.3.0-alpha.2` |
+| `localfolio-monorepo`（根）、`@folio/workbench-suite` | `0.3.0-alpha.3` |
 | `@folio/base-storage-host`、`base-runtime-host`、`base-settings-ui`、`test-overview-host` | `0.2.0-alpha.0` |
 | 其余包（含 `@folio/test-suite`） | `0.3.0-alpha.0` |

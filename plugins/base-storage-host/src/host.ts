@@ -6,7 +6,7 @@ import type {
   JsonStore,
   PluginStorageNamespace,
 } from '@folio/base-contract'
-import { createFsSeam, createJsonStore } from './fs-seam.js'
+import { createFsSeam, createJsonStore, createLocalFsSeam } from './fs-seam.js'
 import {
   ensureDirSync,
   normalizePluginId,
@@ -28,7 +28,11 @@ export function createFolioStorageService(
   ensureDirSync(sharedDir)
   ensureDirSync(pluginsDir)
 
-  const fsSeam = createFsSeam(options.ctx)
+  // Plugin storage lives under LocalFolio's own host app-data root, outside any
+  // DSH agent workspace. Routing it through DSH ctx.fs subjects internal plugin
+  // state to dsh-fs-sandbox (workspace-write / read-only), so always use the
+  // local atomic fs seam here.
+  const fsSeam = createLocalFsSeam()
   const namespaces = new Map<string, PluginStorageNamespace>()
 
   const forPlugin = (rawPluginId: string): PluginStorageNamespace => {

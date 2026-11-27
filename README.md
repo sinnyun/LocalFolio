@@ -1,3 +1,5 @@
+最新构建包地址：`https://github.com/sinnyun/LocalFolio/releases/download/v0.3.0-alpha.3/localfolio-workbench.tgz`
+
 # LocalFolio
 
 **基于 DeepSeek Harness (DSH) 原生体系持续增量演进的个人工作台。**
@@ -143,7 +145,7 @@ LocalFolio/
 已在 Windows 上用 DSH `0.2.2-rc.5` 验证。打开 DSH 的「插件 → 添加插件」，把 [GitHub Releases](https://github.com/sinnyun/LocalFolio/releases) 中所选版本的 `localfolio-workbench.tgz` 下载地址粘贴到「包名或地址」。已验证的预发布版本：
 
 ```text
-https://github.com/sinnyun/LocalFolio/releases/download/v0.3.0-alpha.2/localfolio-workbench.tgz
+https://github.com/sinnyun/LocalFolio/releases/download/v0.3.0-alpha.3/localfolio-workbench.tgz
 ```
 
 安装后，在插件页启用 `@folio/workbench-suite`，按 DSH 提示重启。点「工作台」进入，顶部可切换文件浏览器、画板、物料和项目库。点「返回 DSH」或按 `Esc` 回到 DSH。

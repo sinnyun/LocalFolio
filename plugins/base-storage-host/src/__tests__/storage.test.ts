@@ -38,6 +38,42 @@ describe('@folio/base-storage-host', () => {
     expect(() => canvasNs.dataPath('..', 'escape.json')).toThrow(/禁止越界/)
   })
 
+  it('uses local atomic fs for plugin storage even when ctx.fs denies writes under workspace-write mode', async () => {
+    const sandboxedDshFs = {
+      resolve: vi.fn(async (p: string) => ({ targetKey: `opaque:${p}`, displayPath: p })),
+      readText: vi.fn(async () => {
+        throw Object.assign(new Error('missing file'), { code: 'FS_NOT_FOUND' })
+      }),
+      writeText: vi.fn(async (target: { displayPath: string }) => {
+        throw new Error(
+          `cannot write "${target.displayPath}": file access denied under workspace-write mode`,
+        )
+      }),
+      stat: vi.fn(async () => undefined),
+      listDir: vi.fn(async () => []),
+      deleteFile: vi.fn(async () => {
+        throw new Error('file access denied under workspace-write mode')
+      }),
+    }
+    const ctx = {
+      get: (name: string) => (name === 'fs' ? sandboxedDshFs : undefined),
+    }
+
+    const storage = createFolioStorageService({ dataDir: tmpDir, ctx })
+    expect(storage.fs.provider).toBe('local-node-fs')
+
+    const filesNs = storage.forPlugin('workspace-files-host')
+    const metadataStore = filesNs.jsonStore(
+      'metadata.json',
+      z.object({ version: z.number(), tags: z.array(z.string()) }),
+      () => ({ version: 1, tags: [] }),
+    )
+
+    await metadataStore.write({ version: 1, tags: ['starred'] })
+    expect(await metadataStore.read()).toEqual({ version: 1, tags: ['starred'] })
+    expect(sandboxedDshFs.writeText).not.toHaveBeenCalled()
+  })
+
   it('safely probes ctx.get("fs") without throwing on Cordis-style Proxy contexts', async () => {
     const files = new Map<string, string>()
     const fakeDshFs = {

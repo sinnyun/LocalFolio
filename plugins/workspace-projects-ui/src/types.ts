@@ -181,4 +181,9 @@ export type CardZoom = 'sm' | 'md' | 'lg'
 export type SortMode = 'name' | 'size' | 'mtime'
 export type CategoryFilter = 'all' | FileCategory
 
+export type FileViewMode = 'grid' | 'waterfall' | 'equal' | 'list'
+export type FileGroupBy = 'none' | 'time' | 'type' | 'name' | 'folder'
+export type FileSortKey = 'name' | 'mtime' | 'size' | 'type'
+export type SortDir = 'asc' | 'desc'
+
 export type { TaskSnapshot }

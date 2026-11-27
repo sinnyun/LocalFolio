@@ -150,8 +150,8 @@ export interface TagFilesResult {
   readonly totalCount: number
 }
 
-export type ViewMode = 'grid' | 'list'
-export type GroupBy = 'none' | 'time' | 'type' | 'name' | 'parent'
+export type ViewMode = 'grid' | 'waterfall' | 'equal' | 'list'
+export type GroupBy = 'none' | 'time' | 'type' | 'name' | 'folder'
 export type SortBy = 'name' | 'mtime' | 'size' | 'type' | 'rating'
 export type SortDir = 'asc' | 'desc'
 export type CategoryFilter = 'all' | FileCategory
@@ -179,7 +179,7 @@ export interface PaneState {
   readonly categoryFilter: CategoryFilter
   readonly minRating: number
   readonly viewMode: ViewMode
-  readonly gridSize: number
+  readonly cardSize: number
   readonly groupBy: GroupBy
   readonly sortBy: SortBy
   readonly sortDir: SortDir

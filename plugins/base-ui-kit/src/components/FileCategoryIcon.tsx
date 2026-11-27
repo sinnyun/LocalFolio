@@ -69,6 +69,8 @@ export interface LazyThumbImageProps {
   readonly observeViewport?: boolean
   readonly className?: string
   readonly dataAttr?: string
+  /** Reports the decoded image's natural size once, for masonry/justified layouts. */
+  readonly onAspectRatio?: (naturalWidth: number, naturalHeight: number) => void
 }
 
 export function LazyThumbImage({
@@ -82,6 +84,7 @@ export function LazyThumbImage({
   observeViewport = true,
   className,
   dataAttr,
+  onAspectRatio,
 }: LazyThumbImageProps): React.ReactElement {
   const hostRef = React.useRef<HTMLDivElement | null>(null)
   const [inView, setInView] = React.useState(
@@ -148,7 +151,10 @@ export function LazyThumbImage({
           loading="lazy"
           decoding="async"
           draggable={false}
-          onLoad={() => setLoadedSrc(activeSrc)}
+          onLoad={event => {
+            setLoadedSrc(activeSrc)
+            onAspectRatio?.(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)
+          }}
           onError={() => setFailedSrc(activeSrc)}
           className={cn(
             'h-full w-full transition-opacity duration-150',

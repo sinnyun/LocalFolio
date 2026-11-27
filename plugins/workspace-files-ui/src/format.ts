@@ -1,10 +1,14 @@
-import { compareNaturalName } from '@folio/base-collection-ui/client'
+import {
+  compareNaturalName,
+  groupItemsByCategory,
+  groupItemsByNameInitial,
+  groupItemsByTime,
+} from '@folio/base-collection-ui/client'
 import { TAG_COLOR_PALETTE } from '@folio/base-metadata-ui/client'
 import { categoryLabel, formatBytes, formatDateTime } from '@folio/base-ui-kit/client'
 import type {
   CategoryFilter,
   DirChildGroup,
-  FileCategory,
   FileEntry,
   FileGroup,
   FileMetaRecord,
@@ -14,17 +18,6 @@ import type {
 } from './types.js'
 
 export { TAG_COLOR_PALETTE, categoryLabel, formatBytes, formatDateTime }
-
-const CATEGORY_ORDER: readonly FileCategory[] = [
-  'folder',
-  'image',
-  'video',
-  'audio',
-  'document',
-  'code',
-  'archive',
-  'other',
-]
 
 export function toPathKey(filePath: string): string {
   const trimmed = filePath.trim()
@@ -127,32 +120,14 @@ export function sortEntries(
   })
 }
 
-function resolveTimeBucket(ms: number, now: Date): { key: string; title: string; order: number } {
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const dayMs = 86_400_000
-  if (ms >= startOfToday) return { key: 'today', title: '今天', order: 0 }
-  if (ms >= startOfToday - dayMs) return { key: 'yesterday', title: '昨天', order: 1 }
-  if (ms >= startOfToday - 7 * dayMs) return { key: 'week', title: '本周', order: 2 }
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
-  if (ms >= startOfMonth) return { key: 'month', title: '本月', order: 3 }
-  const startOfYear = new Date(now.getFullYear(), 0, 1).getTime()
-  if (ms >= startOfYear) return { key: 'year', title: '今年', order: 4 }
-  return { key: 'earlier', title: '更早', order: 5 }
-}
-
-function resolveNameBucket(name: string): { key: string; title: string; order: number } {
-  const first = name.trim().charAt(0).toUpperCase()
-  if (!first) return { key: 'other', title: '其他', order: 99 }
-  if (first >= '0' && first <= '9') return { key: '0-9', title: '0-9', order: 0 }
-  if (first >= 'A' && first <= 'Z') {
-    return { key: first, title: first, order: 1 + (first.charCodeAt(0) - 65) }
-  }
-  return { key: 'symbol', title: '中文与符号', order: 50 }
+/** Legacy `parent` (父子文件夹) still maps to the shared `folder` grouping. */
+function normalizeGroupBy(groupBy: GroupBy | 'parent'): GroupBy {
+  return groupBy === 'parent' ? 'folder' : groupBy
 }
 
 export function groupEntries(
   entries: readonly FileEntry[],
-  groupBy: GroupBy,
+  groupBy: GroupBy | 'parent',
   childGroups: readonly DirChildGroup[],
   sortBy: SortBy,
   sortDir: SortDir,
@@ -163,9 +138,10 @@ export function groupEntries(
   minRating = 0,
   mode: 'directory' | 'tag' = 'directory',
 ): FileGroup[] {
+  const effectiveGroupBy = normalizeGroupBy(groupBy)
   const hasFilter = Boolean(filterQuery.trim()) || categoryFilter !== 'all' || minRating > 0
 
-  if (groupBy === 'parent') {
+  if (effectiveGroupBy === 'folder') {
     if (mode === 'tag') {
       const filtered = filterEntries(entries, filterQuery, categoryFilter, metadataMap, minRating)
       const byParent = new Map<string, { folderName: string; folderPath: string; items: FileEntry[] }>()
@@ -245,7 +221,7 @@ export function groupEntries(
   const filtered = filterEntries(entries, filterQuery, categoryFilter, metadataMap, minRating)
   if (filtered.length === 0) return []
 
-  if (groupBy === 'none') {
+  if (effectiveGroupBy === 'none') {
     const sorted = sortEntries(filtered, sortBy, sortDir, true, metadataMap)
     return [
       {
@@ -259,73 +235,11 @@ export function groupEntries(
     ]
   }
 
-  if (groupBy === 'type') {
-    const buckets = new Map<FileCategory, FileEntry[]>()
-    for (const entry of filtered) {
-      const list = buckets.get(entry.category) ?? []
-      list.push(entry)
-      buckets.set(entry.category, list)
-    }
-    const groups: FileGroup[] = []
-    for (const cat of CATEGORY_ORDER) {
-      const list = buckets.get(cat)
-      if (!list || list.length === 0) continue
-      const sorted = sortEntries(list, sortBy, sortDir, false, metadataMap)
-      groups.push({
-        key: `type:${cat}`,
-        title: categoryLabel(cat),
-        entries: sorted,
-        totalCount: sorted.length,
-        truncated: false,
-        isSubfolder: false,
-      })
-    }
-    return groups
-  }
-
-  if (groupBy === 'time') {
-    const map = new Map<string, { title: string; order: number; items: FileEntry[] }>()
-    for (const entry of filtered) {
-      const bucket = resolveTimeBucket(entry.mtimeMs, now)
-      const existing = map.get(bucket.key)
-      if (existing) {
-        existing.items.push(entry)
-      } else {
-        map.set(bucket.key, { title: bucket.title, order: bucket.order, items: [entry] })
-      }
-    }
-    return Array.from(map.entries())
-      .sort((a, b) => a[1].order - b[1].order)
-      .map(([key, bucket]) => {
-        const sorted = sortEntries(bucket.items, sortBy, sortDir, true, metadataMap)
-        return {
-          key: `time:${key}`,
-          title: bucket.title,
-          entries: sorted,
-          totalCount: sorted.length,
-          truncated: false,
-          isSubfolder: false,
-        }
-      })
-  }
-
-  // groupBy === 'name'
-  const map = new Map<string, { title: string; order: number; items: FileEntry[] }>()
-  for (const entry of filtered) {
-    const bucket = resolveNameBucket(entry.name)
-    const existing = map.get(bucket.key)
-    if (existing) {
-      existing.items.push(entry)
-    } else {
-      map.set(bucket.key, { title: bucket.title, order: bucket.order, items: [entry] })
-    }
-  }
-  return Array.from(map.entries())
-    .sort((a, b) => a[1].order - b[1].order)
-    .map(([key, bucket]) => {
-      const sorted = sortEntries(bucket.items, sortBy, sortDir, true, metadataMap)
+  if (effectiveGroupBy === 'type') {
+    return groupItemsByCategory(filtered, entry => entry.category).map(bucket => {
+      const sorted = sortEntries(bucket.items, sortBy, sortDir, false, metadataMap)
       return {
-        key: `name:${key}`,
+        key: bucket.key,
         title: bucket.title,
         entries: sorted,
         totalCount: sorted.length,
@@ -333,4 +247,22 @@ export function groupEntries(
         isSubfolder: false,
       }
     })
+  }
+
+  const buckets =
+    effectiveGroupBy === 'time'
+      ? groupItemsByTime(filtered, entry => entry.mtimeMs, now)
+      : groupItemsByNameInitial(filtered, entry => entry.name)
+
+  return buckets.map(bucket => {
+    const sorted = sortEntries(bucket.items, sortBy, sortDir, true, metadataMap)
+    return {
+      key: bucket.key,
+      title: bucket.title,
+      entries: sorted,
+      totalCount: sorted.length,
+      truncated: false,
+      isSubfolder: false,
+    }
+  })
 }

@@ -579,15 +579,20 @@ describe('@folio/workspace-files-ui integration', () => {
     expect(findByDataAttr('data-lf-file-item', 'C:\\Data\\readme.md')).not.toBeNull()
     fireEvent.change(filterInput, { target: { value: '' } })
 
-    // Adjust grid size slider and switch to list view and back
+    // Adjust the card-size slider and verify the tile geometry follows it
     const gridSlider = document.querySelector('[data-lf-files-grid-size="left"]') as HTMLInputElement
     fireEvent.change(gridSlider, { target: { value: '192' } })
-    expect(
-      (document.querySelector('[data-lf-files-grid="left"]') as HTMLElement).style.gridTemplateColumns,
-    ).toContain('192px')
+    expect(gridSlider.value).toBe('192')
+    const tile = document.querySelector('[data-lf-collection-item]') as HTMLElement
+    expect(tile.style.width).toBe('223px')
 
     fireEvent.click(document.querySelector('[data-lf-files-view-list="left"]')!)
     expect(document.querySelector('[data-lf-files-list="left"]')).not.toBeNull()
+    expect(document.querySelector('[data-lf-files-list-header="left"]')).not.toBeNull()
+    fireEvent.click(document.querySelector('[data-lf-files-view-waterfall="left"]')!)
+    expect(document.querySelector('[data-lf-files-waterfall="left"]')).not.toBeNull()
+    fireEvent.click(document.querySelector('[data-lf-files-view-equal="left"]')!)
+    expect(document.querySelector('[data-lf-files-equal="left"]')).not.toBeNull()
     fireEvent.click(document.querySelector('[data-lf-files-view-grid="left"]')!)
 
     // Editable path navigation + back/forward

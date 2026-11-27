@@ -9,11 +9,14 @@ import { ProjectsLeft } from '../components/ProjectsLeft.js'
 import { ProjectsMain } from '../components/ProjectsMain.js'
 import { ProjectsStatus } from '../components/ProjectsStatus.js'
 import { ProjectsProvider } from '../context.js'
+import { buildProjectFileGroups, sortProjectFiles } from '../format.js'
 import type {
   AiStatusResult,
   LibraryIndex,
   ProjectAiSamplePreview,
   ProjectDetailResult,
+  ProjectFileEntry,
+  ProjectFolderGroup,
   TaskSnapshot,
 } from '../types.js'
 
@@ -156,11 +159,152 @@ const sampleDetail: ProjectDetailResult = {
   },
 }
 
+describe('project file grouping helpers', () => {
+  const files: ProjectFileEntry[] = [
+    {
+      relPath: 'renders/hero.jpg',
+      folderRelPath: 'renders',
+      name: 'hero.jpg',
+      ext: '.jpg',
+      category: 'image',
+      mime: 'image/jpeg',
+      thumbSupported: true,
+      size: 2048,
+      mtimeMs: 1700000000000,
+      fingerprint: '2048:1',
+      thumbKey: 'hero',
+    },
+    {
+      relPath: 'renders/brief.pdf',
+      folderRelPath: 'renders',
+      name: 'brief.pdf',
+      ext: '.pdf',
+      category: 'document',
+      mime: 'application/pdf',
+      thumbSupported: true,
+      size: 1024,
+      mtimeMs: 1600000000000,
+      fingerprint: '1024:1',
+      thumbKey: 'brief',
+    },
+    {
+      relPath: 'notes/readme.md',
+      folderRelPath: 'notes',
+      name: 'readme.md',
+      ext: '.md',
+      category: 'document',
+      mime: 'text/markdown',
+      thumbSupported: false,
+      size: 512,
+      mtimeMs: 1500000000000,
+      fingerprint: '512:1',
+      thumbKey: 'readme',
+    },
+  ]
+  const groups: ProjectFolderGroup[] = [
+    {
+      relPath: 'renders',
+      name: 'renders',
+      depth: 1,
+      fileCount: 2,
+      totalBytes: 3072,
+      files: files.slice(0, 2),
+    },
+    {
+      relPath: 'notes',
+      name: 'notes',
+      depth: 1,
+      fileCount: 1,
+      totalBytes: 512,
+      files: files.slice(2),
+    },
+  ]
+
+  it('groups by folder, type, name, and none while filtering and sorting', () => {
+    expect(
+      buildProjectFileGroups(groups, {
+        groupBy: 'folder',
+        query: '',
+        categoryFilter: 'all',
+        sortKey: 'name',
+        sortDir: 'asc',
+      }).map(group => group.relPath),
+    ).toEqual(['renders', 'notes'])
+
+    expect(
+      buildProjectFileGroups(groups, {
+        groupBy: 'type',
+        query: '',
+        categoryFilter: 'all',
+        sortKey: 'size',
+        sortDir: 'desc',
+      }).map(group => group.name),
+    ).toEqual(['图片', '文档'])
+
+    const byName = buildProjectFileGroups(groups, {
+      groupBy: 'name',
+      query: '',
+      categoryFilter: 'all',
+      sortKey: 'name',
+      sortDir: 'asc',
+    })
+    expect(byName.map(group => group.name)).toEqual(['B', 'H', 'R'])
+
+    const none = buildProjectFileGroups(groups, {
+      groupBy: 'none',
+      query: '',
+      categoryFilter: 'all',
+      sortKey: 'name',
+      sortDir: 'asc',
+    })
+    expect(none).toHaveLength(1)
+    expect(none[0]!.files.map(file => file.name)).toEqual(['brief.pdf', 'hero.jpg', 'readme.md'])
+
+    const filtered = buildProjectFileGroups(groups, {
+      groupBy: 'folder',
+      query: 'pdf',
+      categoryFilter: 'all',
+      sortKey: 'name',
+      sortDir: 'asc',
+    })
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]!.files.map(file => file.name)).toEqual(['brief.pdf'])
+
+    const images = buildProjectFileGroups(groups, {
+      groupBy: 'none',
+      query: '',
+      categoryFilter: 'image',
+      sortKey: 'name',
+      sortDir: 'asc',
+    })
+    expect(images[0]!.files.map(file => file.name)).toEqual(['hero.jpg'])
+  })
+
+  it('sorts project files by key and direction with a natural name tiebreak', () => {
+    expect(sortProjectFiles(files, 'size', 'asc').map(file => file.name)).toEqual([
+      'readme.md',
+      'brief.pdf',
+      'hero.jpg',
+    ])
+    expect(sortProjectFiles(files, 'mtime', 'desc').map(file => file.name)).toEqual([
+      'hero.jpg',
+      'brief.pdf',
+      'readme.md',
+    ])
+    expect(sortProjectFiles(files, 'name', 'desc').map(file => file.name)).toEqual([
+      'readme.md',
+      'hero.jpg',
+      'brief.pdf',
+    ])
+  })
+})
+
 describe('@folio/workspace-projects-ui', () => {
   const fetchSpy = vi.fn()
 
   beforeEach(() => {
     fetchSpy.mockReset()
+    window.localStorage.clear()
     fetchSpy.mockImplementation(async (url: string, init?: RequestInit) => {
       const action = decodeURIComponent(String(url).split('/lf/rpc/')[1] ?? '')
       const body = init?.body ? JSON.parse(String(init.body)) : {}
@@ -372,6 +516,18 @@ describe('@folio/workspace-projects-ui', () => {
       expect(screen.getByText('brief.pdf')).toBeTruthy()
       expect(container.querySelector('[data-lf-projects-sidebar]')).toBeTruthy()
     })
+
+    // Unified collection view: the same four view modes as the file browser
+    fireEvent.click(screen.getByRole('button', { name: '瀑布视图' }))
+    expect(container.querySelector('[data-lf-projects-waterfall]')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '等高视图' }))
+    expect(container.querySelector('[data-lf-projects-equal]')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '列表视图' }))
+    expect(container.querySelector('[data-lf-projects-list]')).toBeTruthy()
+    expect(container.querySelector('[data-lf-projects-list-header]')).toBeTruthy()
+    expect(screen.getByText('hero.jpg')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '网格视图' }))
+    expect(container.querySelector('[data-lf-projects-grid]')).toBeTruthy()
 
     // Change banner is visible and sync button triggers projects.sync
     const syncBtn = screen.getByRole('button', { name: '立即增量更新' })

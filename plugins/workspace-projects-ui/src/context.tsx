@@ -22,6 +22,9 @@ import type {
   AiStatusResult,
   CardZoom,
   CategoryFilter,
+  FileGroupBy,
+  FileSortKey,
+  FileViewMode,
   LibraryIndex,
   LibraryRoot,
   ProjectAiSamplePreview,
@@ -30,8 +33,72 @@ import type {
   ProjectFileEntry,
   ProjectManifest,
   ProjectSummary,
+  SortDir,
   SortMode,
 } from './types.js'
+
+const FILE_VIEW_PREFS_KEY = 'folio.projects.ui.v1'
+
+interface PersistedFileViewPrefs {
+  readonly viewMode?: FileViewMode
+  readonly cardSize?: number
+  readonly groupBy?: FileGroupBy
+  readonly sortKey?: FileSortKey
+  readonly sortDir?: SortDir
+}
+
+interface FileViewPrefs extends Required<PersistedFileViewPrefs> {}
+
+function readFileViewPrefs(): FileViewPrefs {
+  const defaults: FileViewPrefs = {
+    viewMode: 'grid',
+    cardSize: 176,
+    groupBy: 'folder',
+    sortKey: 'name',
+    sortDir: 'asc',
+  }
+  if (typeof window === 'undefined') return defaults
+  try {
+    const raw = window.localStorage.getItem(FILE_VIEW_PREFS_KEY)
+    if (!raw) return defaults
+    const parsed = JSON.parse(raw) as PersistedFileViewPrefs
+    return {
+      viewMode:
+        parsed.viewMode === 'waterfall' ||
+        parsed.viewMode === 'equal' ||
+        parsed.viewMode === 'list'
+          ? parsed.viewMode
+          : 'grid',
+      cardSize:
+        typeof parsed.cardSize === 'number' && parsed.cardSize >= 96 && parsed.cardSize <= 320
+          ? parsed.cardSize
+          : defaults.cardSize,
+      groupBy:
+        parsed.groupBy === 'none' ||
+        parsed.groupBy === 'time' ||
+        parsed.groupBy === 'type' ||
+        parsed.groupBy === 'name'
+          ? parsed.groupBy
+          : 'folder',
+      sortKey:
+        parsed.sortKey === 'mtime' || parsed.sortKey === 'size' || parsed.sortKey === 'type'
+          ? parsed.sortKey
+          : 'name',
+      sortDir: parsed.sortDir === 'desc' ? 'desc' : 'asc',
+    }
+  } catch {
+    return defaults
+  }
+}
+
+function writeFileViewPrefs(prefs: PersistedFileViewPrefs): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(FILE_VIEW_PREFS_KEY, JSON.stringify(prefs))
+  } catch {
+    // ignore quota / storage errors
+  }
+}
 
 export interface ProjectsContextValue {
   readonly indexLoading: boolean
@@ -64,9 +131,11 @@ export interface ProjectsContextValue {
   readonly onlyChanged: boolean
   readonly fileSearchQuery: string
   readonly categoryFilter: CategoryFilter
-  readonly cardZoom: CardZoom
-  readonly sortMode: SortMode
-  readonly collapsedGroups: ReadonlySet<string>
+  readonly viewMode: FileViewMode
+  readonly cardSize: number
+  readonly groupBy: FileGroupBy
+  readonly sortKey: FileSortKey
+  readonly sortDir: SortDir
   readonly addDialogOpen: boolean
   readonly syncingProjectId: string | null
   readonly checkingProjectId: string | null
@@ -98,10 +167,11 @@ export interface ProjectsContextValue {
   setOnlyChanged(only: boolean): void
   setFileSearchQuery(q: string): void
   setCategoryFilter(cat: CategoryFilter): void
-  setCardZoom(zoom: CardZoom): void
-  setSortMode(mode: SortMode): void
-  toggleGroupCollapsed(relPath: string): void
-  setAllGroupsCollapsed(collapsed: boolean): void
+  setViewMode(mode: FileViewMode): void
+  setCardSize(size: number): void
+  setGroupBy(groupBy: FileGroupBy): void
+  setSortKey(key: FileSortKey): void
+  setSortDir(dir: SortDir): void
   setAddDialogOpen(open: boolean): void
   pickAndAddLibrary(): Promise<void>
   addLibraryByPath(rootPath: string, name?: string): Promise<boolean>
@@ -199,9 +269,12 @@ export function ProjectsProvider({
   const [onlyChanged, setOnlyChanged] = React.useState(false)
   const [fileSearchQuery, setFileSearchQuery] = React.useState('')
   const [categoryFilter, setCategoryFilter] = React.useState<CategoryFilter>('all')
-  const [cardZoom, setCardZoom] = React.useState<CardZoom>('md')
-  const [sortMode, setSortMode] = React.useState<SortMode>('name')
-  const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => new Set())
+  const [fileViewPrefs] = React.useState<FileViewPrefs>(() => readFileViewPrefs())
+  const [viewMode, setViewMode] = React.useState<FileViewMode>(fileViewPrefs.viewMode)
+  const [cardSize, setCardSize] = React.useState(fileViewPrefs.cardSize)
+  const [groupBy, setGroupBy] = React.useState<FileGroupBy>(fileViewPrefs.groupBy)
+  const [sortKey, setSortKey] = React.useState<FileSortKey>(fileViewPrefs.sortKey)
+  const [sortDir, setSortDir] = React.useState<SortDir>(fileViewPrefs.sortDir)
   const [addDialogOpen, setAddDialogOpen] = React.useState(false)
   const [syncingProjectId, setSyncingProjectId] = React.useState<string | null>(null)
   const [checkingProjectId, setCheckingProjectId] = React.useState<string | null>(null)
@@ -222,6 +295,10 @@ export function ProjectsProvider({
     setLightboxOpen,
     setLightboxIndex,
   } = useLightboxState()
+
+  React.useEffect(() => {
+    writeFileViewPrefs({ viewMode, cardSize, groupBy, sortKey, sortDir })
+  }, [viewMode, cardSize, groupBy, sortKey, sortDir])
 
   // Keep activeLibraryId valid as libraries load/change
   React.useEffect(() => {
@@ -354,7 +431,6 @@ export function ProjectsProvider({
       return
     }
     setSelectedFile(null)
-    setCollapsedGroups(new Set())
     void loadProjectDetail(selectedProjectId)
   }, [selectedProjectId, loadProjectDetail])
 
@@ -965,26 +1041,6 @@ export function ProjectsProvider({
     [interactions],
   )
 
-  const toggleGroupCollapsed = React.useCallback((relPath: string) => {
-    setCollapsedGroups(prev => {
-      const next = new Set(prev)
-      if (next.has(relPath)) next.delete(relPath)
-      else next.add(relPath)
-      return next
-    })
-  }, [])
-
-  const setAllGroupsCollapsed = React.useCallback(
-    (collapsed: boolean) => {
-      if (!collapsed || !projectManifest) {
-        setCollapsedGroups(new Set())
-        return
-      }
-      setCollapsedGroups(new Set(projectManifest.groups.map(g => g.relPath)))
-    },
-    [projectManifest],
-  )
-
   const value: ProjectsContextValue = {
     indexLoading: indexQuery.isLoading,
     indexError: indexQuery.error?.message ?? null,
@@ -1016,9 +1072,11 @@ export function ProjectsProvider({
     onlyChanged,
     fileSearchQuery,
     categoryFilter,
-    cardZoom,
-    sortMode,
-    collapsedGroups,
+    viewMode,
+    cardSize,
+    groupBy,
+    sortKey,
+    sortDir,
     addDialogOpen,
     syncingProjectId,
     checkingProjectId,
@@ -1050,10 +1108,11 @@ export function ProjectsProvider({
     setOnlyChanged,
     setFileSearchQuery,
     setCategoryFilter,
-    setCardZoom,
-    setSortMode,
-    toggleGroupCollapsed,
-    setAllGroupsCollapsed,
+    setViewMode,
+    setCardSize,
+    setGroupBy,
+    setSortKey,
+    setSortDir,
     setAddDialogOpen,
     pickAndAddLibrary,
     addLibraryByPath,

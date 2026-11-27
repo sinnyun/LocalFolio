@@ -15,6 +15,8 @@ export interface FileThumbnailProps {
   readonly entry: FileEntry
   readonly sizePx: number
   readonly compact?: boolean
+  readonly objectFit?: 'cover' | 'contain'
+  readonly onAspectRatio?: (naturalWidth: number, naturalHeight: number) => void
   readonly className?: string
 }
 
@@ -22,6 +24,8 @@ export function FileThumbnail({
   entry,
   sizePx,
   compact = false,
+  objectFit = 'contain',
+  onAspectRatio,
   className,
 }: FileThumbnailProps): React.ReactElement {
   const bucket = snapThumbBucket(sizePx)
@@ -36,7 +40,8 @@ export function FileThumbnail({
       ext={entry.ext}
       compact={compact}
       fallbackIconSize={iconSize}
-      objectFit="contain"
+      objectFit={objectFit}
+      onAspectRatio={onAspectRatio}
       observeViewport={false}
       dataAttr={entry.path}
       className={className}

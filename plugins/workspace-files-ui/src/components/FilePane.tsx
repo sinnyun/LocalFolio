@@ -1,22 +1,17 @@
 import * as React from 'react'
 import {
   AlertTriangle,
-  ArrowDownNarrowWide,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  ArrowUpNarrowWide,
-  ChevronDown,
-  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Columns2,
   Eye,
   EyeOff,
   FolderOpen,
-  LayoutGrid,
-  List,
   Pencil,
   RefreshCw,
-  Search,
   Star,
   StickyNote,
   X,
@@ -42,9 +37,12 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Skeleton,
   cn,
 } from '@folio/base-ui-kit/client'
+import {
+  CollectionBrowser,
+  type CollectionItemRenderLayout,
+} from '@folio/base-collection-ui/client'
 import { useFiles } from '../context.js'
 import {
   buildDownloadUrl,
@@ -59,6 +57,7 @@ import type { FolioFileDragSession } from '@folio/base-contract'
 import type {
   CategoryFilter,
   FileEntry,
+  FileGroup,
   GroupBy,
   PaneId,
   SortBy,
@@ -69,6 +68,34 @@ import { FileThumbnail } from './FileIcon.js'
 export interface FilePaneProps {
   readonly paneId: PaneId
 }
+
+const CATEGORY_FILTER_OPTIONS = [
+  { value: 'all', label: '全部类型' },
+  { value: 'folder', label: '文件夹' },
+  { value: 'image', label: '图片' },
+  { value: 'video', label: '视频' },
+  { value: 'audio', label: '音频' },
+  { value: 'document', label: '文档' },
+  { value: 'code', label: '代码' },
+  { value: 'archive', label: '压缩包' },
+  { value: 'other', label: '其他' },
+] as const
+
+const SORT_OPTIONS = [
+  { value: 'name', label: '按名称' },
+  { value: 'mtime', label: '修改时间' },
+  { value: 'size', label: '文件大小' },
+  { value: 'type', label: '文件类型' },
+  { value: 'rating', label: '按星级' },
+] as const
+
+const RATING_FILTER_OPTIONS = [
+  { value: '0', label: '全部星级' },
+  { value: '1', label: '≥ 1 ★' },
+  { value: '3', label: '≥ 3 ★' },
+  { value: '4', label: '≥ 4 ★' },
+  { value: '5', label: '仅 5 ★' },
+] as const
 
 export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
   const {
@@ -114,7 +141,7 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
   const [pathDraft, setPathDraft] = React.useState(pane.path)
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => new Set())
   const pathContainerRef = React.useRef<HTMLFormElement | null>(null)
-  const filterContainerRef = React.useRef<HTMLDivElement | null>(null)
+  const paneSectionRef = React.useRef<HTMLElement | null>(null)
 
   React.useEffect(() => {
     if (!editingPath) {
@@ -165,6 +192,7 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
   const hasFilter =
     Boolean(pane.filterQuery.trim()) || pane.categoryFilter !== 'all' || pane.minRating > 0
   const isCurrentFav = pane.mode === 'directory' && Boolean(pane.path) && isFavoritePath(pane.path)
+  const allCollapsed = groups.length > 0 && groups.every(group => collapsedGroups.has(group.key))
 
   const startPathEdit = (): void => {
     setPathDraft(pane.path)
@@ -186,6 +214,10 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
       else next.add(key)
       return next
     })
+  }
+
+  const toggleAllGroups = (collapse: boolean): void => {
+    setCollapsedGroups(collapse ? new Set(groups.map(group => group.key)) : new Set())
   }
 
   const handleEntryOpen = (entry: FileEntry): void => {
@@ -282,7 +314,9 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
       event.preventDefault()
-      filterContainerRef.current?.querySelector('input')?.focus()
+      paneSectionRef.current
+        ?.querySelector<HTMLInputElement>(`[data-lf-files-filter="${paneId}"]`)
+        ?.focus()
       return
     }
     if (
@@ -357,8 +391,104 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
     )
   }
 
+  const renderEntry = (
+    entry: FileEntry,
+    layout: CollectionItemRenderLayout,
+  ): React.ReactElement => {
+    const selected = pane.selectedPath === entry.path
+    const interactionProps = {
+      type: 'button' as const,
+      draggable: !entry.isDir,
+      'data-lf-file-item': entry.path,
+      'data-selected': selected ? 'true' : undefined,
+      onClick: () => selectEntry(paneId, entry),
+      onDoubleClick: () => handleEntryOpen(entry),
+      onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) =>
+        handleEntryPointerDown(entry, event),
+      onDragStart: (event: React.DragEvent<HTMLButtonElement>) =>
+        handleEntryDragStart(entry, event),
+      onDragEnd: () => handleEntryDragEnd(entry),
+      onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) =>
+        handleEntryContextMenu(entry, event),
+    }
+
+    if (layout.mode === 'list') {
+      return (
+        <button
+          {...interactionProps}
+          className={cn(
+            'grid h-full w-full grid-cols-[1fr_140px_76px_76px_120px] items-center gap-2 rounded px-3 text-left text-xs transition-colors hover:bg-accent/50 focus-visible:outline-none',
+            selected && 'bg-accent text-accent-foreground',
+          )}
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            <FileThumbnail entry={entry} sizePx={48} compact className="size-7 shrink-0" />
+            <span className="truncate font-medium">{entry.name}</span>
+          </div>
+          <div className="min-w-0">{renderEntryMetaBadges(entry, true)}</div>
+          <span className="truncate text-[11px] text-muted-foreground">
+            {categoryLabel(entry.category)}
+          </span>
+          <span className="text-right text-[11px] tabular-nums text-muted-foreground">
+            {entry.isDir ? '—' : formatBytes(entry.size)}
+          </span>
+          <span className="text-right text-[11px] tabular-nums text-muted-foreground">
+            {formatDateTime(entry.mtimeMs)}
+          </span>
+        </button>
+      )
+    }
+
+    const parentInfo = pane.mode === 'tag' ? getParentDirLabel(entry.path) : null
+
+    return (
+      <button
+        {...interactionProps}
+        className={cn(
+          'group flex h-full w-full min-w-0 flex-col overflow-hidden rounded-lg border border-transparent bg-card/50 p-2 text-left transition-colors hover:border-border hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          selected && 'border-primary/60 bg-accent ring-1 ring-primary/40',
+        )}
+      >
+        <div className="relative min-h-0 w-full flex-1">
+          <FileThumbnail
+            entry={entry}
+            sizePx={Math.max(96, Math.round(layout.width))}
+            objectFit={layout.mode === 'grid' ? 'contain' : 'cover'}
+            onAspectRatio={layout.reportAspectRatio}
+            className="h-full w-full"
+          />
+        </div>
+        <div className="mt-1.5 min-w-0 space-y-0.5">
+          <div className="line-clamp-2 break-all text-xs font-medium leading-snug text-foreground">
+            {entry.name}
+          </div>
+          <div className="truncate text-[10px] tabular-nums text-muted-foreground">
+            {parentInfo
+              ? `${parentInfo.parentName} · ${entry.isDir ? '文件夹' : formatBytes(entry.size)}`
+              : entry.isDir
+                ? '文件夹'
+                : `${formatBytes(entry.size)} · ${categoryLabel(entry.category)}`}
+          </div>
+          {renderEntryMetaBadges(entry)}
+        </div>
+      </button>
+    )
+  }
+
+  const emptyTitle = hasFilter
+    ? '没有匹配的文件'
+    : pane.mode === 'tag'
+      ? '该标签下暂无文件'
+      : '此文件夹为空'
+  const emptyDescription = hasFilter
+    ? '尝试修改筛选关键词、星级或类型条件。'
+    : pane.mode === 'tag'
+      ? '选中任意文件并在右侧检查器中添加该标签后，文件会聚合显示在这里。'
+      : '当前目录下没有任何文件或子文件夹。'
+
   return (
     <section
+      ref={paneSectionRef}
       data-lf-files-pane={paneId}
       data-active={isActive ? 'true' : undefined}
       tabIndex={-1}
@@ -609,276 +739,174 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
         )}
       </div>
 
-      {/* Row 2: 筛选 + 星级筛选 + 视图切换 + 网格大小 + 分组 + 排序 */}
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-border bg-muted/20 px-2 py-1.5">
-        <div
-          ref={filterContainerRef}
-          className="relative flex min-w-32 flex-1 items-center sm:max-w-52"
-        >
-          <Search
-            size={13}
-            className="pointer-events-none absolute left-2 text-muted-foreground"
-          />
-          <Input
-            data-lf-files-filter={paneId}
-            aria-label="筛选文件名"
-            placeholder="筛选文件名… (Ctrl+F)"
-            value={pane.filterQuery}
-            onChange={ev => updatePane(paneId, { filterQuery: ev.target.value })}
-            className="h-7 pl-7 pr-6 text-xs"
-          />
-          {pane.filterQuery ? (
-            <button
-              type="button"
-              aria-label="清除筛选"
-              onClick={() => updatePane(paneId, { filterQuery: '' })}
-              className="absolute right-1.5 flex size-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-            >
-              <X size={12} />
-            </button>
-          ) : null}
-        </div>
-
-        <Select
-          value={pane.categoryFilter}
-          onValueChange={val => updatePane(paneId, { categoryFilter: val as CategoryFilter })}
-        >
-          <SelectTrigger
-            size="sm"
-            data-lf-files-category={paneId}
-            aria-label="按类型筛选"
-            className="h-7 w-24 px-2 text-xs"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="pointer-events-auto">
-            <SelectItem value="all">全部类型</SelectItem>
-            <SelectItem value="folder">文件夹</SelectItem>
-            <SelectItem value="image">图片</SelectItem>
-            <SelectItem value="video">视频</SelectItem>
-            <SelectItem value="audio">音频</SelectItem>
-            <SelectItem value="document">文档</SelectItem>
-            <SelectItem value="code">代码</SelectItem>
-            <SelectItem value="archive">压缩包</SelectItem>
-            <SelectItem value="other">其他</SelectItem>
-          </SelectContent>
-        </Select>
-
-        {/* 星级筛选 */}
-        <Select
-          value={String(pane.minRating)}
-          onValueChange={val => updatePane(paneId, { minRating: Number(val) })}
-        >
-          <SelectTrigger
-            size="sm"
-            data-lf-files-rating-filter={paneId}
-            aria-label="按星级筛选"
-            className="h-7 w-24 px-2 text-xs"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="pointer-events-auto">
-            <SelectItem value="0">全部星级</SelectItem>
-            <SelectItem value="1">≥ 1 ★</SelectItem>
-            <SelectItem value="3">≥ 3 ★</SelectItem>
-            <SelectItem value="4">≥ 4 ★</SelectItem>
-            <SelectItem value="5">仅 5 ★</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Select value={pane.groupBy} onValueChange={val => void setGroupBy(paneId, val as GroupBy)}>
-          <SelectTrigger
-            size="sm"
-            data-lf-files-groupby={paneId}
-            aria-label="分组方式"
-            className="h-7 w-28 px-2 text-xs"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="pointer-events-auto">
-            <SelectItem value="none">不分组</SelectItem>
-            <SelectItem value="time">按时间分组</SelectItem>
-            <SelectItem value="type">按类型分组</SelectItem>
-            <SelectItem value="name">按名称分组</SelectItem>
-            <SelectItem value="parent">父子文件夹</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <div className="flex items-center gap-0.5">
-          <Select
-            value={pane.sortBy}
-            onValueChange={val => updatePane(paneId, { sortBy: val as SortBy })}
-          >
-            <SelectTrigger
-              size="sm"
-              data-lf-files-sortby={paneId}
-              aria-label="排序依据"
-              className="h-7 w-24 px-2 text-xs"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="pointer-events-auto">
-              <SelectItem value="name">按名称</SelectItem>
-              <SelectItem value="mtime">修改时间</SelectItem>
-              <SelectItem value="size">文件大小</SelectItem>
-              <SelectItem value="type">文件类型</SelectItem>
-              <SelectItem value="rating">按星级</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            data-lf-files-sortdir={paneId}
-            aria-label={pane.sortDir === 'asc' ? '切换为降序' : '切换为升序'}
-            title={pane.sortDir === 'asc' ? '当前升序，点击降序' : '当前降序，点击升序'}
-            onClick={() =>
-              updatePane(paneId, { sortDir: pane.sortDir === 'asc' ? 'desc' : 'asc' })
-            }
-          >
-            {pane.sortDir === 'asc' ? (
-              <ArrowUpNarrowWide size={13} />
-            ) : (
-              <ArrowDownNarrowWide size={13} />
-            )}
-          </Button>
-        </div>
-
-        <div className="ml-auto flex items-center gap-1.5">
-          {pane.viewMode === 'grid' ? (
-            <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-0.5">
-              <span className="text-[10px] text-muted-foreground">缩略图</span>
-              <input
-                type="range"
-                min={96}
-                max={240}
-                step={16}
-                aria-label="调整网格大小"
-                data-lf-files-grid-size={paneId}
-                value={pane.gridSize}
-                onChange={ev => updatePane(paneId, { gridSize: Number(ev.target.value) })}
-                className="h-1.5 w-20 cursor-pointer accent-primary"
-              />
-              <span className="w-8 text-right font-mono text-[10px] tabular-nums text-muted-foreground">
-                {pane.gridSize}
-              </span>
-            </div>
-          ) : null}
-
-          <div className="flex items-center rounded-md border border-border bg-background p-0.5">
-            <button
-              type="button"
-              data-lf-files-view-grid={paneId}
-              aria-label="网格视图"
-              aria-pressed={pane.viewMode === 'grid'}
-              title="网格视图"
-              onClick={() => updatePane(paneId, { viewMode: 'grid' })}
-              className={cn(
-                'flex size-6 items-center justify-center rounded-sm transition-colors',
-                pane.viewMode === 'grid'
-                  ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <LayoutGrid size={13} />
-            </button>
-            <button
-              type="button"
-              data-lf-files-view-list={paneId}
-              aria-label="列表视图"
-              aria-pressed={pane.viewMode === 'list'}
-              title="列表视图"
-              onClick={() => updatePane(paneId, { viewMode: 'list' })}
-              className={cn(
-                'flex size-6 items-center justify-center rounded-sm transition-colors',
-                pane.viewMode === 'list'
-                  ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <List size={13} />
-            </button>
-          </div>
-
-          {pane.mode === 'directory' ? (
+      {/* Row 2+: 统一集合视图（筛选 / 分类 / 星级 / 分组 / 排序 / 四视图） */}
+      <CollectionBrowser<FileGroup, FileEntry>
+        groups={groups}
+        getGroupKey={group => group.key}
+        getGroupItems={group => group.entries}
+        getGroupTitle={group => group.title}
+        getGroupMeta={group => `${group.totalCount}${group.truncated ? '+' : ''} 项`}
+        hasHeader={group => Boolean(group.title)}
+        getItemKey={entry => entry.path}
+        getItemAspectKey={entry => `files:${entry.path}`}
+        getItemAspect={entry => (entry.category === 'image' ? 1 : 1.25)}
+        renderItem={(entry, _group, layout) => renderEntry(entry, layout)}
+        renderGroupActions={group =>
+          group.isSubfolder && group.folderPath ? (
             <Button
-              variant={pane.showHidden ? 'secondary' : 'ghost'}
-              size="icon-xs"
-              data-lf-files-hidden-toggle={paneId}
-              aria-label={pane.showHidden ? '隐藏点文件' : '显示隐藏文件'}
-              aria-pressed={pane.showHidden}
-              title={pane.showHidden ? '已显示隐藏文件' : '已隐藏点文件'}
-              onClick={() => void setShowHidden(paneId, !pane.showHidden)}
-            >
-              {pane.showHidden ? <Eye size={13} /> : <EyeOff size={13} />}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-
-      {/* Viewport */}
-      <div
-        data-lf-files-viewport={paneId}
-        className="flex min-h-0 flex-1 flex-col overflow-auto p-3"
-      >
-        {pane.error ? (
-          <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            <span className="truncate">{pane.error}</span>
-            <Button variant="outline" size="xs" onClick={() => void refreshPane(paneId)}>
-              重试
-            </Button>
-          </div>
-        ) : null}
-
-        {pane.mode === 'tag' && pane.missingPaths.length > 0 ? (
-          <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-            <div className="flex items-center gap-2">
-              <AlertTriangle size={14} className="shrink-0" />
-              <span>有 {pane.missingPaths.length} 个带该标签的文件在磁盘上已移动或删除</span>
-            </div>
-            <Button
-              variant="outline"
+              variant="ghost"
               size="xs"
-              onClick={() => void pruneMissingTaggedFiles(paneId)}
+              onClick={() => void navigatePane(paneId, group.folderPath!)}
+              className="h-6 text-[11px] text-muted-foreground hover:text-foreground"
             >
-              清理失效记录
+              进入目录
             </Button>
-          </div>
-        ) : null}
+          ) : null
+        }
+        collapsedKeys={collapsedGroups}
+        onToggleGroupCollapsed={toggleGroupCollapsed}
+        viewMode={pane.viewMode}
+        onViewModeChange={mode => updatePane(paneId, { viewMode: mode })}
+        viewDataAttrPrefix="data-lf-files"
+        viewDataAttrValue={paneId}
+        cardSize={pane.cardSize}
+        onCardSizeChange={size => updatePane(paneId, { cardSize: size })}
+        cardSizeRange={{ min: 96, max: 256, step: 16 }}
+        cardSizeDataAttr={{ 'data-lf-files-grid-size': paneId }}
+        filter={{
+          value: pane.filterQuery,
+          onChange: value => updatePane(paneId, { filterQuery: value }),
+          placeholder: '筛选文件名… (Ctrl+F)',
+          ariaLabel: '筛选文件名',
+          dataAttr: { 'data-lf-files-filter': paneId },
+        }}
+        category={{
+          value: pane.categoryFilter,
+          onChange: value =>
+            updatePane(paneId, { categoryFilter: value as CategoryFilter }),
+          options: CATEGORY_FILTER_OPTIONS,
+          dataAttr: { 'data-lf-files-category': paneId },
+        }}
+        extraFilters={
+          <>
+            <Select
+              value={String(pane.minRating)}
+              onValueChange={value => updatePane(paneId, { minRating: Number(value) })}
+            >
+              <SelectTrigger
+                size="sm"
+                aria-label="按星级筛选"
+                className="h-7 w-24 px-2 text-xs"
+                data-lf-files-rating-filter={paneId}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="pointer-events-auto">
+                {RATING_FILTER_OPTIONS.map(option => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-        {pane.loading && pane.entries.length === 0 ? (
-          <div
-            className="grid gap-3"
-            style={{
-              gridTemplateColumns: `repeat(auto-fill, minmax(${pane.gridSize}px, 1fr))`,
-            }}
+            {pane.mode === 'directory' ? (
+              <Button
+                variant={pane.showHidden ? 'secondary' : 'ghost'}
+                size="icon-xs"
+                data-lf-files-hidden-toggle={paneId}
+                aria-label={pane.showHidden ? '隐藏点文件' : '显示隐藏文件'}
+                aria-pressed={pane.showHidden}
+                title={pane.showHidden ? '已显示隐藏文件' : '已隐藏点文件'}
+                onClick={() => void setShowHidden(paneId, !pane.showHidden)}
+              >
+                {pane.showHidden ? <Eye size={13} /> : <EyeOff size={13} />}
+              </Button>
+            ) : null}
+          </>
+        }
+        groupBy={{
+          value: pane.groupBy,
+          onChange: value => void setGroupBy(paneId, value as GroupBy),
+          dataAttr: { 'data-lf-files-groupby': paneId },
+        }}
+        sort={{
+          value: pane.sortBy,
+          onChange: value => updatePane(paneId, { sortBy: value as SortBy }),
+          options: SORT_OPTIONS,
+          dir: pane.sortDir,
+          onDirChange: dir => updatePane(paneId, { sortDir: dir }),
+          dataAttr: { 'data-lf-files-sortby': paneId },
+          dirDataAttr: { 'data-lf-files-sortdir': paneId },
+        }}
+        actions={
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            title={allCollapsed ? '展开全部分组' : '折叠全部分组'}
+            aria-label={allCollapsed ? '展开全部分组' : '折叠全部分组'}
+            onClick={() => toggleAllGroups(!allCollapsed)}
           >
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="space-y-2">
-                <Skeleton className="aspect-square w-full rounded-lg" />
-                <Skeleton className="h-3 w-3/4" />
-              </div>
-            ))}
-          </div>
-        ) : groups.length === 0 ? (
+            {allCollapsed ? <ChevronsUpDown size={14} /> : <ChevronsDownUp size={14} />}
+          </Button>
+        }
+        banner={
+          pane.error || (pane.mode === 'tag' && pane.missingPaths.length > 0) ? (
+            <div className="space-y-1 border-b border-border px-3 py-2">
+              {pane.error ? (
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  <span className="truncate">{pane.error}</span>
+                  <Button variant="outline" size="xs" onClick={() => void refreshPane(paneId)}>
+                    重试
+                  </Button>
+                </div>
+              ) : null}
+              {pane.mode === 'tag' && pane.missingPaths.length > 0 ? (
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle size={14} className="shrink-0" />
+                    <span>有 {pane.missingPaths.length} 个带该标签的文件在磁盘上已移动或删除</span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    onClick={() => void pruneMissingTaggedFiles(paneId)}
+                  >
+                    清理失效记录
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null
+        }
+        loading={pane.loading && pane.entries.length === 0}
+        skeletonCount={8}
+        listRowHeight={34}
+        listHeader={
+          pane.viewMode === 'list' ? (
+            <div
+              data-lf-files-list-header={paneId}
+              className="grid grid-cols-[1fr_140px_76px_76px_120px] items-center gap-2 rounded-t-lg border border-border border-b-0 bg-muted/40 px-3 py-1.5 text-[11px] font-medium text-muted-foreground"
+            >
+              <span>名称</span>
+              <span>标记</span>
+              <span>类型</span>
+              <span className="text-right">大小</span>
+              <span className="text-right">修改时间</span>
+            </div>
+          ) : null
+        }
+        emptyTitle={emptyTitle}
+        emptyDescription={emptyDescription}
+        emptyState={
           <Empty className="my-auto border border-dashed">
             <EmptyHeader>
               <EmptyMedia variant="icon">
                 <FolderOpen size={22} />
               </EmptyMedia>
-              <EmptyTitle className="text-base">
-                {hasFilter
-                  ? '没有匹配的文件'
-                  : pane.mode === 'tag'
-                    ? '该标签下暂无文件'
-                    : '此文件夹为空'}
-              </EmptyTitle>
-              <EmptyDescription className="text-xs">
-                {hasFilter
-                  ? '尝试修改筛选关键词、星级或类型条件。'
-                  : pane.mode === 'tag'
-                    ? '选中任意文件并在右侧检查器中添加该标签后，文件会聚合显示在这里。'
-                    : '当前目录下没有任何文件或子文件夹。'}
-              </EmptyDescription>
+              <EmptyTitle className="text-base">{emptyTitle}</EmptyTitle>
+              <EmptyDescription className="text-xs">{emptyDescription}</EmptyDescription>
             </EmptyHeader>
             {hasFilter ? (
               <EmptyContent>
@@ -894,170 +922,11 @@ export function FilePane({ paneId }: FilePaneProps): React.ReactElement {
               </EmptyContent>
             ) : null}
           </Empty>
-        ) : (
-          <div className="space-y-4">
-            {groups.map(group => {
-              const collapsed = collapsedGroups.has(group.key)
-              return (
-                <div key={group.key} data-lf-files-group={group.key} className="space-y-2">
-                  {group.title ? (
-                    <div className="flex items-center justify-between gap-2 border-b border-border/70 pb-1">
-                      <button
-                        type="button"
-                        onClick={() => toggleGroupCollapsed(group.key)}
-                        className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-foreground hover:text-primary"
-                      >
-                        {collapsed ? (
-                          <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
-                        ) : (
-                          <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
-                        )}
-                        {group.isSubfolder ? (
-                          <FolderOpen size={14} className="shrink-0 text-sky-500" />
-                        ) : null}
-                        <span className="truncate">{group.title}</span>
-                        <Badge variant="secondary" className="px-1.5 py-0 text-[10px] tabular-nums">
-                          {group.totalCount}
-                          {group.truncated ? '+' : ''}
-                        </Badge>
-                      </button>
-
-                      {group.isSubfolder && group.folderPath ? (
-                        <Button
-                          variant="ghost"
-                          size="xs"
-                          onClick={() => void navigatePane(paneId, group.folderPath!)}
-                          className="h-6 text-[11px] text-muted-foreground hover:text-foreground"
-                        >
-                          进入目录
-                        </Button>
-                      ) : null}
-                    </div>
-                  ) : null}
-
-                  {collapsed ? null : group.entries.length === 0 ? (
-                    <div className="px-2 py-2 text-[11px] text-muted-foreground">
-                      空子文件夹
-                    </div>
-                  ) : pane.viewMode === 'grid' ? (
-                    <div
-                      data-lf-files-grid={paneId}
-                      className="grid gap-2.5"
-                      style={{
-                        gridTemplateColumns: `repeat(auto-fill, minmax(${pane.gridSize}px, 1fr))`,
-                      }}
-                    >
-                      {group.entries.map(entry => {
-                        const selected = pane.selectedPath === entry.path
-                        const thumbHeight = Math.max(72, Math.round(pane.gridSize * 0.72))
-                        const parentInfo =
-                          pane.mode === 'tag' ? getParentDirLabel(entry.path) : null
-                        return (
-                          <button
-                            key={entry.path}
-                            type="button"
-                            draggable={!entry.isDir}
-                            data-lf-file-item={entry.path}
-                            data-selected={selected ? 'true' : undefined}
-                            onClick={() => selectEntry(paneId, entry)}
-                            onDoubleClick={() => handleEntryOpen(entry)}
-                            onPointerDown={ev => handleEntryPointerDown(entry, ev)}
-                            onDragStart={ev => handleEntryDragStart(entry, ev)}
-                            onDragEnd={() => handleEntryDragEnd(entry)}
-                            onContextMenu={ev => handleEntryContextMenu(entry, ev)}
-                            className={cn(
-                              'group flex flex-col gap-1.5 rounded-lg border border-transparent bg-card/50 p-2 text-left transition-colors hover:border-border hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                              selected && 'border-primary/60 bg-accent ring-1 ring-primary/40',
-                            )}
-                          >
-                            <div style={{ height: thumbHeight }} className="w-full">
-                              <FileThumbnail
-                                entry={entry}
-                                sizePx={pane.gridSize}
-                                className="h-full w-full"
-                              />
-                            </div>
-                            <div className="min-w-0 space-y-1">
-                              <div className="line-clamp-2 break-all text-xs font-medium leading-snug text-foreground">
-                                {entry.name}
-                              </div>
-                              <div className="truncate text-[10px] tabular-nums text-muted-foreground">
-                                {parentInfo
-                                  ? `${parentInfo.parentName} · ${entry.isDir ? '文件夹' : formatBytes(entry.size)}`
-                                  : entry.isDir
-                                    ? '文件夹'
-                                    : `${formatBytes(entry.size)} · ${categoryLabel(entry.category)}`}
-                              </div>
-                              {renderEntryMetaBadges(entry)}
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <div
-                      data-lf-files-list={paneId}
-                      className="overflow-hidden rounded-lg border border-border"
-                    >
-                      <div className="grid grid-cols-[1fr_140px_76px_88px_132px] items-center gap-2 border-b border-border bg-muted/40 px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
-                        <span>名称</span>
-                        <span>标记</span>
-                        <span>类型</span>
-                        <span className="text-right">大小</span>
-                        <span className="text-right">修改时间</span>
-                      </div>
-                      <div className="divide-y divide-border/60">
-                        {group.entries.map(entry => {
-                          const selected = pane.selectedPath === entry.path
-                          return (
-                            <button
-                              key={entry.path}
-                              type="button"
-                              draggable={!entry.isDir}
-                              data-lf-file-item={entry.path}
-                              data-selected={selected ? 'true' : undefined}
-                              onClick={() => selectEntry(paneId, entry)}
-                              onDoubleClick={() => handleEntryOpen(entry)}
-                              onPointerDown={ev => handleEntryPointerDown(entry, ev)}
-                              onDragStart={ev => handleEntryDragStart(entry, ev)}
-                              onDragEnd={() => handleEntryDragEnd(entry)}
-                              onContextMenu={ev => handleEntryContextMenu(entry, ev)}
-                              className={cn(
-                                'grid w-full grid-cols-[1fr_140px_76px_88px_132px] items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-accent/50 focus-visible:outline-none',
-                                selected && 'bg-accent text-accent-foreground',
-                              )}
-                            >
-                              <div className="flex min-w-0 items-center gap-2">
-                                <FileThumbnail
-                                  entry={entry}
-                                  sizePx={48}
-                                  compact
-                                  className="size-7 shrink-0"
-                                />
-                                <span className="truncate font-medium">{entry.name}</span>
-                              </div>
-                              <div className="min-w-0">{renderEntryMetaBadges(entry, true)}</div>
-                              <span className="truncate text-[11px] text-muted-foreground">
-                                {categoryLabel(entry.category)}
-                              </span>
-                              <span className="text-right text-[11px] tabular-nums text-muted-foreground">
-                                {entry.isDir ? '—' : formatBytes(entry.size)}
-                              </span>
-                              <span className="text-right text-[11px] tabular-nums text-muted-foreground">
-                                {formatDateTime(entry.mtimeMs)}
-                              </span>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
+        }
+        scrollDataAttr={{ 'data-lf-files-viewport': paneId }}
+        metaHeight={56}
+        resetKey={`${pane.path}:${pane.mode}:${pane.groupBy}:${pane.viewMode}`}
+      />
     </section>
   )
 }

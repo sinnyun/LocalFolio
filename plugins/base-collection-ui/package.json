@@ -3,7 +3,7 @@
   "version": "0.3.0-alpha.0",
   "private": true,
   "type": "module",
-  "description": "LocalFolio shared collection browsing primitives: virtualized list and collapsible grouped grid, natural-name filtering and sorting, controlled lightbox state/view, and local file/folder picker dialog.",
+  "description": "LocalFolio shared collection browsing primitives: unified collection browser with grid/waterfall/equal-height/list views, grouping and aspect-ratio layout engine, virtualized list and collapsible grouped grid, natural-name filtering and sorting, controlled lightbox state/view, and local file/folder picker dialog.",
   "main": "./lib/index.js",
   "exports": {
     ".": "./lib/index.js",

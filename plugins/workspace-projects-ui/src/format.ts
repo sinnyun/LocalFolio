@@ -1,9 +1,18 @@
-import { compareNaturalName } from '@folio/base-collection-ui/client'
+import {
+  compareNaturalName,
+  groupItemsByCategory,
+  groupItemsByNameInitial,
+  groupItemsByTime,
+} from '@folio/base-collection-ui/client'
 import { categoryLabel, formatBytes, formatDateTime } from '@folio/base-ui-kit/client'
 import type {
+  CategoryFilter,
+  FileGroupBy,
+  FileSortKey,
   ProjectFileEntry,
   ProjectFolderGroup,
   ProjectSummary,
+  SortDir,
   SortMode,
 } from './types.js'
 
@@ -44,11 +53,23 @@ export function buildProjectMediaUrl(projectId: string, relPath: string): string
   return `/lf/projects/media?${params.toString()}`
 }
 
-export function sortFiles(files: readonly ProjectFileEntry[], mode: SortMode): ProjectFileEntry[] {
+export function sortProjectFiles(
+  files: readonly ProjectFileEntry[],
+  key: FileSortKey,
+  dir: SortDir = 'asc',
+): ProjectFileEntry[] {
+  const factor = dir === 'asc' ? 1 : -1
   const copy = [...files]
   copy.sort((a, b) => {
-    if (mode === 'size') return b.size - a.size || a.name.localeCompare(b.name)
-    if (mode === 'mtime') return b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name)
+    let cmp = 0
+    if (key === 'mtime') cmp = a.mtimeMs - b.mtimeMs
+    else if (key === 'size') cmp = a.size - b.size
+    else if (key === 'type') {
+      cmp = a.category.localeCompare(b.category) || a.ext.localeCompare(b.ext)
+    } else {
+      cmp = compareNaturalName(a.name, b.name)
+    }
+    if (cmp !== 0) return cmp * factor
     return compareNaturalName(a.name, b.name)
   })
   return copy
@@ -93,31 +114,92 @@ export function sortProjects(
   return copy
 }
 
-export function filterAndSortGroups(
-  groups: readonly ProjectFolderGroup[],
+function matchesProjectFile(
+  file: ProjectFileEntry,
+  folderName: string,
   query: string,
-  categoryFilter: string,
-  sortMode: SortMode,
-): ProjectFolderGroup[] {
-  const q = query.trim().toLowerCase()
-  const filtered: ProjectFolderGroup[] = []
+  categoryFilter: CategoryFilter,
+): boolean {
+  if (categoryFilter !== 'all' && file.category !== categoryFilter) return false
+  if (!query) return true
+  return (
+    file.name.toLowerCase().includes(query) || folderName.toLowerCase().includes(query)
+  )
+}
 
-  for (const group of groups) {
-    const files = group.files.filter(f => {
-      if (categoryFilter !== 'all' && f.category !== categoryFilter) return false
-      if (q && !f.name.toLowerCase().includes(q) && !group.name.toLowerCase().includes(q)) {
-        return false
-      }
-      return true
-    })
-    if (files.length === 0) continue
-    const sorted = sortFiles(files, sortMode)
-    filtered.push({
-      ...group,
-      fileCount: sorted.length,
-      totalBytes: sorted.reduce((acc, f) => acc + f.size, 0),
-      files: sorted,
-    })
+function withFiles(
+  group: Pick<ProjectFolderGroup, 'relPath' | 'name' | 'depth'>,
+  files: readonly ProjectFileEntry[],
+): ProjectFolderGroup {
+  return {
+    ...group,
+    fileCount: files.length,
+    totalBytes: files.reduce((acc, file) => acc + file.size, 0),
+    files,
   }
-  return filtered
+}
+
+export interface BuildProjectFileGroupsOptions {
+  readonly groupBy: FileGroupBy
+  readonly query: string
+  readonly categoryFilter: CategoryFilter
+  readonly sortKey: FileSortKey
+  readonly sortDir: SortDir
+  readonly now?: Date
+}
+
+/**
+ * Turns the manifest's folder groups into the grouped collection every view
+ * mode consumes: `folder` keeps the real directory structure, the rest flatten
+ * and bucket through the shared grouping helpers.
+ */
+export function buildProjectFileGroups(
+  groups: readonly ProjectFolderGroup[],
+  options: BuildProjectFileGroupsOptions,
+): ProjectFolderGroup[] {
+  const query = options.query.trim().toLowerCase()
+  const { categoryFilter, sortKey, sortDir } = options
+
+  if (options.groupBy === 'folder') {
+    const result: ProjectFolderGroup[] = []
+    for (const group of groups) {
+      const files = group.files.filter(file =>
+        matchesProjectFile(file, group.name, query, categoryFilter),
+      )
+      if (files.length === 0) continue
+      result.push(withFiles(group, sortProjectFiles(files, sortKey, sortDir)))
+    }
+    return result
+  }
+
+  const flat: ProjectFileEntry[] = []
+  for (const group of groups) {
+    for (const file of group.files) {
+      if (matchesProjectFile(file, group.name, query, categoryFilter)) flat.push(file)
+    }
+  }
+  if (flat.length === 0) return []
+
+  if (options.groupBy === 'none') {
+    return [
+      withFiles(
+        { relPath: 'all', name: '', depth: 0 },
+        sortProjectFiles(flat, sortKey, sortDir),
+      ),
+    ]
+  }
+
+  const buckets =
+    options.groupBy === 'time'
+      ? groupItemsByTime(flat, file => file.mtimeMs, options.now ?? new Date())
+      : options.groupBy === 'type'
+        ? groupItemsByCategory(flat, file => file.category)
+        : groupItemsByNameInitial(flat, file => file.name)
+
+  return buckets.map(bucket =>
+    withFiles(
+      { relPath: bucket.key, name: bucket.title, depth: 0 },
+      sortProjectFiles(bucket.items, sortKey, sortDir),
+    ),
+  )
 }

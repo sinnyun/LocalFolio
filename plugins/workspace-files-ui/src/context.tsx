@@ -38,8 +38,10 @@ const UI_PREFS_STORAGE_KEY = 'folio.files.ui.v1'
 interface PersistedFilesPrefs {
   readonly dualPane?: boolean
   readonly viewMode?: ViewMode
+  readonly cardSize?: number
+  /** Legacy key kept so pre-existing profiles migrate on read. */
   readonly gridSize?: number
-  readonly groupBy?: GroupBy
+  readonly groupBy?: GroupBy | 'parent'
   readonly sortBy?: SortBy
   readonly sortDir?: SortDir
   readonly showHidden?: boolean
@@ -68,8 +70,19 @@ function writePersistedPrefs(prefs: PersistedFilesPrefs): void {
   }
 }
 
+function normalizeViewMode(value: unknown): ViewMode {
+  return value === 'waterfall' || value === 'equal' || value === 'list' ? value : 'grid'
+}
+
+function normalizeGroupBy(value: unknown): GroupBy {
+  if (value === 'time' || value === 'type' || value === 'name') return value
+  if (value === 'folder' || value === 'parent') return 'folder'
+  return 'none'
+}
+
 function createInitialPane(id: PaneId, prefs: PersistedFilesPrefs): PaneState {
   const savedPath = id === 'left' ? prefs.leftPath : prefs.rightPath
+  const savedCardSize = prefs.cardSize ?? prefs.gridSize
   return {
     id,
     mode: 'directory',
@@ -87,18 +100,12 @@ function createInitialPane(id: PaneId, prefs: PersistedFilesPrefs): PaneState {
     filterQuery: '',
     categoryFilter: 'all',
     minRating: 0,
-    viewMode: prefs.viewMode === 'list' ? 'list' : 'grid',
-    gridSize:
-      typeof prefs.gridSize === 'number' && prefs.gridSize >= 96 && prefs.gridSize <= 240
-        ? prefs.gridSize
-        : 144,
-    groupBy:
-      prefs.groupBy === 'time' ||
-      prefs.groupBy === 'type' ||
-      prefs.groupBy === 'name' ||
-      prefs.groupBy === 'parent'
-        ? prefs.groupBy
-        : 'none',
+    viewMode: normalizeViewMode(prefs.viewMode),
+    cardSize:
+      typeof savedCardSize === 'number' && savedCardSize >= 96 && savedCardSize <= 320
+        ? savedCardSize
+        : 176,
+    groupBy: normalizeGroupBy(prefs.groupBy),
     sortBy:
       prefs.sortBy === 'mtime' ||
       prefs.sortBy === 'size' ||
@@ -286,7 +293,7 @@ export function FilesProvider({
       writePersistedPrefs({
         dualPane: nextDualPane,
         viewMode: refPane.viewMode,
-        gridSize: refPane.gridSize,
+        cardSize: refPane.cardSize,
         groupBy: refPane.groupBy,
         sortBy: refPane.sortBy,
         sortDir: refPane.sortDir,
@@ -370,7 +377,7 @@ export function FilesProvider({
           {
             path: targetPath || undefined,
             showHidden,
-            includeSubdirChildren: groupBy === 'parent',
+            includeSubdirChildren: groupBy === 'folder',
           },
           { signal: controller.signal },
         )
@@ -642,7 +649,7 @@ export function FilesProvider({
     async (paneId: PaneId, groupBy: GroupBy) => {
       const pane = panesRef.current[paneId]
       updatePane(paneId, { groupBy })
-      if (pane.mode === 'directory' && groupBy === 'parent') {
+      if (pane.mode === 'directory' && groupBy === 'folder') {
         await loadDirectory(paneId, pane.path, {
           pushHistory: false,
           overrideGroupBy: groupBy,

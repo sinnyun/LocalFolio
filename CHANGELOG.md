@@ -6,6 +6,15 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 ---
 
+## 0.3.0-alpha.11
+
+- 中间文件视图统一到 `@folio/base-collection-ui` 的 `CollectionBrowser`：文件浏览器与项目库现在共用同一套工具栏（关键词筛选、类型/分类筛选、分组方式、排序依据 + 升降序、卡片尺寸、视图切换、折叠全部分组）和同一套布局引擎，两侧的差别只剩卡片内容与各自的数据能力（文件浏览器的星级/隐藏文件、项目库的项目级操作）。
+- 新增**瀑布视图**与**等高视图**：瀑布视图按列排布、卡片高度跟随缩略图宽高比；等高视图把同一行的卡片压到同一高度并按比例分配宽度。缩略图解码后把真实宽高比写进共享缓存，两种视图不会在滚动时跳变。文件浏览器与项目库都支持「网格 / 瀑布 / 等高 / 列表」四视图。
+- 分组条件统一为 `不分组 / 按时间 / 按类型 / 按名称 / 按文件夹`；文件浏览器原来的「父子文件夹」并入「按文件夹」，项目库新增时间/类型/名称分组。项目库的视图与分组/排序偏好写入 `localStorage['folio.projects.ui.v1']`，文件浏览器沿用 `folio.files.ui.v1`（旧 `gridSize` 与 `parent` 分组自动迁移）。
+- 修复统一网格视图卡片行之间缺少垂直间距的问题：网格行距与列距统一使用 12px gap；项目库卡片缩略图改为 `contain`，与文件浏览器一致按原始比例完整显示，不再被裁切。
+
+---
+
 ## 0.3.0-alpha.10
 
 - 修复本地构建后热重载时，文件浏览器 / 画板 / 物料工作区左侧面板显示「区域渲染异常」并报 `useSidebar must be used within a SidebarProvider.` 的问题：`@folio/base-ui-kit` 的侧栏 Context、受管 Portal 容器与 Toast 队列改为**页面级单例**（`Symbol.for` 全局符号注册表，见 `page-singleton.ts`），不再随单个插件行被热替换而分叉；`SidebarMenuButton` 的 tooltip 自带 Radix Provider，不再依赖框架那一行的实例；构建脚本对内容未变的产物不再重写，避免一次 `pnpm run build` 因 mtime 变化把每个插件行都热重载一遍。新增回归测试 `plugins/base-ui-kit/src/__tests__/hmr-identity.test.tsx`。

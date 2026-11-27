@@ -1,7 +1,17 @@
 import * as React from 'react'
-import type { DshPluginCategory, PluginManifest } from '@folio/base-contract'
+import type {
+  DshPluginCategory,
+  DshPluginRecord,
+  InternalExtensionSource,
+  PluginManifest,
+} from '@folio/base-contract'
 import { rpcCall } from '@folio/base-contract/rpc'
-import { FolioTag } from '@folio/base-ui-kit/client'
+import {
+  FolioIconChevronDown,
+  FolioIconSearch,
+  FolioTag,
+} from '@folio/base-ui-kit/client'
+import { MY_PLUGINS_STYLES } from './my-plugins-styles.js'
 
 export interface DshSettingsServiceLike {
   describe?(): unknown
@@ -12,12 +22,44 @@ export interface MyPluginsSectionProps {
   readonly loadManifest?: () => Promise<PluginManifest>
 }
 
-const CATEGORY_LABELS: Record<DshPluginCategory, string> = {
-  base: '工作台通用基础能力（base-*）',
-  workspace: '工作区（workspace-*）',
-  feature: '功能插件（feature-*）',
-  test: '测试界面（test-*）',
-  bridge: '桥接插件（bridge-*）',
+interface CategoryMeta {
+  readonly label: string
+  readonly prefix: string
+  readonly accent: string
+  readonly hint: string
+}
+
+const CATEGORY_META: Record<DshPluginCategory, CategoryMeta> = {
+  base: {
+    label: '基础能力',
+    prefix: 'base-*',
+    accent: '#64748b',
+    hint: '工作台通用基础能力：存储、运行时、UI、外壳、布局框架、设置页',
+  },
+  workspace: {
+    label: '工作区',
+    prefix: 'workspace-*',
+    accent: '#3b82f6',
+    hint: '顶部工作区栏里的一项完整功能',
+  },
+  feature: {
+    label: '功能插件',
+    prefix: 'feature-*',
+    accent: '#8b5cf6',
+    hint: '只在一个工作区内部贡献功能',
+  },
+  test: {
+    label: '测试界面',
+    prefix: 'test-*',
+    accent: '#f59e0b',
+    hint: '只为验证界面与集成方式而存在，随 @folio/test-suite 另装',
+  },
+  bridge: {
+    label: '桥接插件',
+    prefix: 'bridge-*',
+    accent: '#14b8a6',
+    hint: '把某项基础能力接进外壳或工具链',
+  },
 }
 
 const CATEGORY_ORDER: readonly DshPluginCategory[] = [
@@ -27,6 +69,16 @@ const CATEGORY_ORDER: readonly DshPluginCategory[] = [
   'test',
   'bridge',
 ]
+
+const SOURCE_LABELS: Record<InternalExtensionSource, string> = {
+  official: '官方',
+  community: '社区',
+  custom: '自建',
+}
+
+type CategoryFilter = 'all' | DshPluginCategory
+
+const EMPTY_COLLAPSED: ReadonlySet<DshPluginCategory> = new Set<DshPluginCategory>()
 
 function extractRuntimeNamespaces(raw: unknown): readonly string[] {
   if (!raw || typeof raw !== 'object') return []
@@ -46,6 +98,28 @@ function extractRuntimeNamespaces(raw: unknown): readonly string[] {
   return Object.keys(raw as Record<string, unknown>)
 }
 
+/** Host/UI suffix is part of the naming convention, so it doubles as a role label. */
+function roleLabelOf(id: string): string | null {
+  if (id.endsWith('-host')) return '后端'
+  if (id.endsWith('-ui')) return '界面'
+  return null
+}
+
+function matchesQuery(item: DshPluginRecord, query: string): boolean {
+  if (!query) return true
+  const haystack = [
+    item.name,
+    item.id,
+    item.loaderId,
+    item.description,
+    ...item.services,
+    ...item.slots,
+  ]
+    .join(' ')
+    .toLowerCase()
+  return haystack.includes(query)
+}
+
 export function MyPluginsSection({
   resolveSettings,
   loadManifest,
@@ -53,6 +127,10 @@ export function MyPluginsSection({
   const [manifest, setManifest] = React.useState<PluginManifest | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [runtimeNamespaces, setRuntimeNamespaces] = React.useState<readonly string[]>([])
+  const [query, setQuery] = React.useState('')
+  const [categoryFilter, setCategoryFilter] = React.useState<CategoryFilter>('all')
+  const [collapsed, setCollapsed] = React.useState<ReadonlySet<DshPluginCategory>>(EMPTY_COLLAPSED)
+  const gridIdPrefix = React.useId()
 
   React.useEffect(() => {
     let cancelled = false
@@ -82,158 +160,318 @@ export function MyPluginsSection({
     }
   }, [loadManifest, resolveSettings])
 
+  const normalizedQuery = query.trim().toLowerCase()
+  const searching = normalizedQuery.length > 0
+
+  const buckets = React.useMemo(() => {
+    const per = new Map<
+      DshPluginCategory,
+      { total: number; enabled: number; matched: readonly DshPluginRecord[] }
+    >()
+    for (const category of CATEGORY_ORDER) {
+      per.set(category, { total: 0, enabled: 0, matched: [] })
+    }
+    for (const item of manifest?.dshPlugins ?? []) {
+      const bucket = per.get(item.category)
+      if (!bucket) continue
+      const total = bucket.total + 1
+      const enabled = bucket.enabled + (item.enabled ? 1 : 0)
+      const matched = matchesQuery(item, normalizedQuery)
+        ? [...bucket.matched, item]
+        : bucket.matched
+      per.set(item.category, { total, enabled, matched })
+    }
+    return per
+  }, [manifest, normalizedQuery])
+
+  const stats = React.useMemo(() => {
+    const plugins = manifest?.dshPlugins ?? []
+    const enabled = plugins.filter(p => p.enabled).length
+    const extensions = manifest?.internalExtensions ?? []
+    return {
+      total: plugins.length,
+      enabled,
+      disabled: plugins.length - enabled,
+      extensions: extensions.length,
+    }
+  }, [manifest])
+
+  const visibleCategories = React.useMemo(() => {
+    return CATEGORY_ORDER.filter(category => {
+      if (categoryFilter !== 'all' && categoryFilter !== category) return false
+      const bucket = buckets.get(category)
+      if (!bucket) return false
+      if (searching) return bucket.matched.length > 0
+      return true
+    })
+  }, [buckets, categoryFilter, searching])
+
+  const allCollapsed = CATEGORY_ORDER.every(category => collapsed.has(category))
+
+  const toggleCategory = React.useCallback((category: DshPluginCategory): void => {
+    setCollapsed(prev => {
+      const next = new Set(prev)
+      if (next.has(category)) next.delete(category)
+      else next.add(category)
+      return next
+    })
+  }, [])
+
+  const toggleAll = React.useCallback((): void => {
+    setCollapsed(prev =>
+      CATEGORY_ORDER.every(category => prev.has(category))
+        ? new Set<DshPluginCategory>()
+        : new Set<DshPluginCategory>(CATEGORY_ORDER),
+    )
+  }, [])
+
+  const showEmptySearch = searching && visibleCategories.length === 0
+
   return (
-    <div
-      data-lf-my-plugins-section=""
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 16,
-        padding: '12px 4px',
-        color: 'var(--dsw-alias-label-primary, #0f1115)',
-        fontSize: 13,
-      }}
-    >
-      <div>
-        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>工作台能力与插件（LocalFolio）</h3>
-        <p
-          style={{
-            margin: '4px 0 0',
-            fontSize: 12,
-            color: 'var(--dsw-alias-label-tertiary, #81858c)',
-          }}
-        >
-          基于 DSH 增量扩展：按「基础能力 / 工作区 / 功能插件 / 测试界面 / 桥接」列举工作台插件，并与插件内嵌的静态扩展分栏治理。
+    <div data-lf-my-plugins-section="" className="lf-mp">
+      <style data-lf-my-plugins-styles="">{MY_PLUGINS_STYLES}</style>
+
+      <header className="lf-mp-header">
+        <div className="lf-mp-title-row">
+          <h3 className="lf-mp-title">工作台能力与插件</h3>
+          <span className="lf-mp-badge">LocalFolio</span>
+        </div>
+        <p className="lf-mp-subtitle">
+          通过 Cordis Service / Slots 增量扩展 DSH。本页只读，启停仍以 DSH 插件页为准。
         </p>
-      </div>
+      </header>
 
       {error ? (
-        <div
-          role="alert"
-          style={{
-            padding: '8px 12px',
-            borderRadius: 8,
-            border: '1px solid var(--dsw-alias-state-error-primary, #ec1313)',
-            fontSize: 12,
-          }}
-        >
+        <div role="alert" className="lf-mp-error">
           清单加载失败：{error}
         </div>
       ) : null}
 
       {manifest ? (
         <>
-          <section
-            data-lf-plugins-layer="dsh"
-            style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
-          >
-            <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.85 }}>
-              一、工作台插件（通过 Cordis Service / Slots 增量扩展 DSH）
+          <div className="lf-mp-stats">
+            <div className="lf-mp-stat" data-lf-plugins-stat="total">
+              <span className="lf-mp-stat-value">{stats.total}</span>
+              <span className="lf-mp-stat-label">工作台插件</span>
+              <span className="lf-mp-stat-hint">分 {CATEGORY_ORDER.length} 类登记</span>
             </div>
-            {CATEGORY_ORDER.map(cat => {
-              const items = manifest.dshPlugins.filter(p => p.category === cat)
+            <div className="lf-mp-stat" data-lf-plugins-stat="enabled">
+              <span className="lf-mp-stat-value">{stats.enabled}</span>
+              <span className="lf-mp-stat-label">已启用</span>
+              <span className="lf-mp-stat-hint">
+                {stats.disabled > 0 ? `${stats.disabled} 个在清单里标为停用` : '全部启用'}
+              </span>
+            </div>
+            <div className="lf-mp-stat" data-lf-plugins-stat="extensions">
+              <span className="lf-mp-stat-value">{stats.extensions}</span>
+              <span className="lf-mp-stat-label">插件内嵌扩展</span>
+              <span className="lf-mp-stat-hint">随宿主插件静态打包</span>
+            </div>
+          </div>
+
+          <div className="lf-mp-toolbar">
+            <label className="lf-mp-search-field">
+              <FolioIconSearch size={13} />
+              <input
+                className="lf-mp-search"
+                type="search"
+                value={query}
+                placeholder="搜索名称、loader id、服务或槽位"
+                aria-label="搜索插件"
+                onChange={event => setQuery(event.target.value)}
+              />
+            </label>
+            <div className="lf-mp-filters" role="group" aria-label="按分类筛选">
+              <button
+                type="button"
+                className="lf-mp-filter"
+                data-lf-filter="all"
+                data-active={categoryFilter === 'all'}
+                data-empty={false}
+                aria-pressed={categoryFilter === 'all'}
+                onClick={() => setCategoryFilter('all')}
+              >
+                全部
+                <span className="lf-mp-filter-count">{stats.total}</span>
+              </button>
+              {CATEGORY_ORDER.map(category => {
+                const bucket = buckets.get(category)
+                const count = searching ? (bucket?.matched.length ?? 0) : (bucket?.total ?? 0)
+                return (
+                  <button
+                    key={category}
+                    type="button"
+                    className="lf-mp-filter"
+                    data-lf-filter={category}
+                    data-active={categoryFilter === category}
+                    data-empty={count === 0}
+                    aria-pressed={categoryFilter === category}
+                    title={CATEGORY_META[category].hint}
+                    onClick={() => setCategoryFilter(category)}
+                  >
+                    <span
+                      className="lf-mp-dot"
+                      style={{ background: CATEGORY_META[category].accent }}
+                      aria-hidden="true"
+                    />
+                    {CATEGORY_META[category].label}
+                    <span className="lf-mp-filter-count">{count}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <section data-lf-plugins-layer="dsh" className="lf-mp-layer">
+            <div className="lf-mp-layer-head">
+              <h4 className="lf-mp-layer-title">工作台插件</h4>
+              <span className="lf-mp-layer-note">经 Cordis Service / Slots 增量扩展 DSH</span>
+              <button type="button" className="lf-mp-link" onClick={toggleAll}>
+                {allCollapsed ? '全部展开' : '全部收起'}
+              </button>
+            </div>
+
+            {showEmptySearch ? (
+              <div className="lf-mp-empty">没有匹配「{query.trim()}」的插件</div>
+            ) : null}
+
+            {visibleCategories.map(category => {
+              const meta = CATEGORY_META[category]
+              const bucket = buckets.get(category)
+              const items = bucket?.matched ?? []
+              const total = bucket?.total ?? 0
+              const enabled = bucket?.enabled ?? 0
+              const open = searching || !collapsed.has(category)
+              const gridId = `${gridIdPrefix}-${category}`
               return (
-                <div
-                  key={cat}
-                  data-lf-plugin-group={cat}
-                  style={{
-                    border: '1px solid var(--dsw-alias-border-l3, rgba(0,0,0,0.12))',
-                    borderRadius: 8,
-                    padding: 10,
-                    background: 'var(--dsw-alias-bg-layer-1, transparent)',
-                  }}
+                <section
+                  key={category}
+                  className="lf-mp-group"
+                  data-lf-plugin-group={category}
+                  data-open={open}
                 >
-                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-                    {CATEGORY_LABELS[cat]}（{items.length}）
-                  </div>
-                  {items.length === 0 ? (
-                    <div style={{ fontSize: 12, opacity: 0.6 }}>暂未登记</div>
-                  ) : (
-                    <ul
-                      style={{
-                        listStyle: 'none',
-                        margin: 0,
-                        padding: 0,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 8,
-                      }}
-                    >
-                      {items.map(item => (
-                        <li
-                          key={item.id}
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'flex-start',
-                            gap: 8,
-                            fontSize: 12,
-                          }}
-                        >
-                          <div>
-                            <div style={{ fontWeight: 500 }}>
-                              {item.name}{' '}
-                              <code style={{ fontSize: 11, opacity: 0.7 }}>{item.loaderId}</code>
-                            </div>
-                            {item.description ? (
-                              <div style={{ opacity: 0.75, marginTop: 2 }}>{item.description}</div>
-                            ) : null}
-                            {item.services.length > 0 ? (
-                              <div style={{ opacity: 0.65, marginTop: 2 }}>
-                                提供服务：{item.services.join(', ')}
+                  <button
+                    type="button"
+                    className="lf-mp-group-head"
+                    aria-expanded={open}
+                    aria-controls={gridId}
+                    onClick={() => toggleCategory(category)}
+                  >
+                    <span
+                      className="lf-mp-group-accent"
+                      style={{ background: meta.accent }}
+                      aria-hidden="true"
+                    />
+                    <span className="lf-mp-group-label">{meta.label}</span>
+                    <code className="lf-mp-group-prefix">{meta.prefix}</code>
+                    <span className="lf-mp-group-count">{searching ? items.length : total}</span>
+                    <span className="lf-mp-group-health">
+                      {enabled === total ? '全部启用' : `已启用 ${enabled}/${total}`}
+                    </span>
+                    <FolioIconChevronDown size={13} className="lf-mp-group-chevron" />
+                  </button>
+
+                  {open ? (
+                    items.length === 0 ? (
+                      <div className="lf-mp-empty">暂未登记</div>
+                    ) : (
+                      <ul className="lf-mp-grid" id={gridId}>
+                        {items.map(item => {
+                          const role = roleLabelOf(item.id)
+                          return (
+                            <li
+                              key={item.id}
+                              className="lf-mp-tile"
+                              data-lf-plugin-card={item.id}
+                              data-enabled={item.enabled}
+                            >
+                              <div className="lf-mp-tile-head">
+                                <span className="lf-mp-tile-name" title={item.name}>
+                                  {item.name}
+                                </span>
+                                <span className="lf-mp-tile-flags">
+                                  {role ? (
+                                    <span
+                                      className="lf-mp-role"
+                                      title="按包名后缀识别：-host 为后端，-ui 为界面"
+                                    >
+                                      {role}
+                                    </span>
+                                  ) : null}
+                                  {item.enabled ? null : (
+                                    <FolioTag tone="neutral">已停用</FolioTag>
+                                  )}
+                                </span>
                               </div>
-                            ) : null}
-                            {item.slots.length > 0 ? (
-                              <div style={{ opacity: 0.65, marginTop: 2 }}>
-                                挂接槽位：{item.slots.join(', ')}
+                              <code className="lf-mp-tile-id" title={item.loaderId}>
+                                {item.loaderId}
+                              </code>
+                              {item.description ? (
+                                <p className="lf-mp-tile-desc">{item.description}</p>
+                              ) : null}
+                              <div className="lf-mp-tile-meta">
+                                {item.services.map(service => (
+                                  <span
+                                    key={`service-${service}`}
+                                    className="lf-mp-chip"
+                                    data-kind="service"
+                                  >
+                                    ctx.{service}
+                                  </span>
+                                ))}
+                                {item.slots.map(slot => (
+                                  <span key={`slot-${slot}`} className="lf-mp-chip" data-kind="slot">
+                                    ↳ {slot}
+                                  </span>
+                                ))}
+                                {item.dependsOn.length > 0 ? (
+                                  <span className="lf-mp-chip" data-kind="dep">
+                                    {item.dependsOn.length} 依赖
+                                  </span>
+                                ) : null}
                               </div>
-                            ) : null}
-                          </div>
-                          <FolioTag tone={item.enabled ? 'info' : 'neutral'}>
-                            {item.enabled ? '已启用' : '已停用'}
-                          </FolioTag>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    )
+                  ) : null}
+                </section>
               )
             })}
           </section>
 
-          <section
-            data-lf-plugins-layer="internal"
-            style={{
-              border: '1px solid var(--dsw-alias-border-l3, rgba(0,0,0,0.12))',
-              borderRadius: 8,
-              padding: 10,
-            }}
-          >
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-              二、插件内嵌扩展（静态打包，如 tldraw 画板引擎）
+          <section data-lf-plugins-layer="internal" className="lf-mp-group">
+            <div className="lf-mp-group-head" data-static="true">
+              <span
+                className="lf-mp-group-accent"
+                style={{ background: '#64748b' }}
+                aria-hidden="true"
+              />
+              <span className="lf-mp-group-label">插件内嵌扩展</span>
+              <code className="lf-mp-group-prefix">静态打包</code>
+              <span className="lf-mp-group-count">{manifest.internalExtensions.length}</span>
+              <span className="lf-mp-group-health">不可独立启停</span>
             </div>
+
             {manifest.internalExtensions.length === 0 ? (
-              <div style={{ fontSize: 12, opacity: 0.6 }}>
+              <div className="lf-mp-empty">
                 暂未登记内部扩展（宿主插件内嵌第三方引擎时登记在此，例如画板工作区的 tldraw）
               </div>
             ) : (
-              <ul
-                style={{
-                  listStyle: 'none',
-                  margin: 0,
-                  padding: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 6,
-                }}
-              >
+              <ul className="lf-mp-ext-list">
                 {manifest.internalExtensions.map(ext => (
-                  <li key={ext.id} style={{ fontSize: 12 }}>
-                    <span style={{ fontWeight: 500 }}>{ext.name}</span>{' '}
-                    <FolioTag tone="neutral">
-                      {ext.ecosystem} · {ext.source} · {ext.hostPluginId}
-                    </FolioTag>
-                    {ext.description ? <div style={{ opacity: 0.75 }}>{ext.description}</div> : null}
+                  <li key={ext.id} className="lf-mp-ext" data-lf-internal-extension={ext.id}>
+                    <div className="lf-mp-ext-head">
+                      <span className="lf-mp-ext-name">{ext.name}</span>
+                      <span className="lf-mp-chip">{ext.ecosystem}</span>
+                      <span className="lf-mp-chip">{SOURCE_LABELS[ext.source]}</span>
+                      <span className="lf-mp-chip" data-kind="service">
+                        {ext.hostPluginId}
+                      </span>
+                      {ext.enabled ? null : <FolioTag tone="neutral">已停用</FolioTag>}
+                    </div>
+                    {ext.description ? <p className="lf-mp-ext-desc">{ext.description}</p> : null}
                   </li>
                 ))}
               </ul>
@@ -241,13 +479,14 @@ export function MyPluginsSection({
           </section>
 
           {runtimeNamespaces.length > 0 ? (
-            <div data-lf-runtime-namespaces="" style={{ fontSize: 11, opacity: 0.7 }}>
-              DSH 运行时配置命名空间（{runtimeNamespaces.length}）：{runtimeNamespaces.join(', ')}
+            <div data-lf-runtime-namespaces="" className="lf-mp-ns">
+              <span>DSH 运行时配置命名空间（{runtimeNamespaces.length}）：</span>
+              <span className="lf-mp-ns-code">{runtimeNamespaces.join(', ')}</span>
             </div>
           ) : null}
         </>
       ) : !error ? (
-        <div style={{ fontSize: 12, opacity: 0.7 }}>正在加载插件清单...</div>
+        <div className="lf-mp-loading">正在加载插件清单...</div>
       ) : null}
     </div>
   )

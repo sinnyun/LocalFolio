@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Eagle Manual Thumbnail Completion (Host)",
+    "description": "Registers a manual-only L3 Eagle local API provider into folioThumbs with dedicated cache library isolation, serial execution, and space circuit-breaker.",
+    "detail": "docs/DETAIL.md"
+  }
+}

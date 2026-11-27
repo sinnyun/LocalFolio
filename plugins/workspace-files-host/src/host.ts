@@ -5,8 +5,10 @@ import { z } from 'zod'
 import {
   FolioError,
   defineAction,
+  type FolioNativeService,
   type FolioRuntimeService,
   type FolioStorageService,
+  type FolioThumbsService,
 } from '@folio/base-contract'
 import { normalizeBrowsePath } from './classify.js'
 import { listDrives, listQuickFolders } from './drives.js'
@@ -24,13 +26,17 @@ import { createWindowsShellThumbProvider, type ShellThumbProvider } from './win-
 export interface RegisterWorkspaceFilesHostOptions {
   readonly runtime: FolioRuntimeService
   readonly storage: FolioStorageService
+  readonly thumbs?: FolioThumbsService
+  readonly native?: FolioNativeService
   readonly thumbProvider?: ShellThumbProvider
 }
 
 export function registerWorkspaceFilesHost(options: RegisterWorkspaceFilesHostOptions): () => void {
-  const { runtime, storage } = options
-  const ownsThumbProvider = !options.thumbProvider
-  const thumbProvider = options.thumbProvider ?? createWindowsShellThumbProvider()
+  const { runtime, storage, thumbs, native } = options
+  const usesSharedServices = Boolean(thumbs || native)
+  const ownsThumbProvider = !options.thumbProvider && !usesSharedServices
+  const thumbProvider =
+    options.thumbProvider ?? (usesSharedServices ? undefined : createWindowsShellThumbProvider())
 
   const pluginStorage = storage.forPlugin('workspace-files-host')
   const prefsStore = pluginStorage.jsonStore('preferences.json', FilesPrefsSchema, () => ({
@@ -407,21 +413,25 @@ export function registerWorkspaceFilesHost(options: RegisterWorkspaceFilesHostOp
       }),
     ),
 
-    runtime.registerRoute('GET', '/files/thumb', createThumbRouteHandler(thumbProvider)),
+    runtime.registerRoute(
+      'GET',
+      '/files/thumb',
+      createThumbRouteHandler({ thumbs, native, thumbProvider }),
+    ),
     runtime.registerRoute('GET', '/files/media', createMediaRouteHandler()),
     runtime.registerRoute('GET', '/files/download', createDownloadRouteHandler()),
   ]
 
   return () => {
     for (const dispose of disposers.reverse()) dispose()
-    if (ownsThumbProvider) {
+    if (ownsThumbProvider && thumbProvider) {
       thumbProvider.dispose()
     }
   }
 }
 
 export const name = 'workspace-files-host'
-export const inject = ['folioRuntime', 'folioStorage'] as const
+export const inject = ['folioRuntime', 'folioStorage', 'folioThumbs', 'folioNative'] as const
 
 export function apply(ctx: Context): void {
   ctx.effect(
@@ -429,6 +439,8 @@ export function apply(ctx: Context): void {
       registerWorkspaceFilesHost({
         runtime: ctx.folioRuntime,
         storage: ctx.folioStorage,
+        thumbs: ctx.folioThumbs,
+        native: ctx.folioNative,
       }),
     'workspace-files-host: actions + thumb/media routes',
   )

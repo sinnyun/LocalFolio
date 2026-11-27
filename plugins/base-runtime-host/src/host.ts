@@ -468,6 +468,38 @@ export function createDefaultPluginManifest(): PluginManifest {
           '@folio/feature-archive-host',
         ],
       },
+      {
+        id: 'feature-thumbs-eagle-host',
+        name: 'Eagle 缩略图手动补全后端',
+        loaderId: '@folio/feature-thumbs-eagle-host',
+        category: 'feature',
+        slots: [],
+        services: [],
+        description: '向缩略图引擎注册手动授权专属的 L3 Eagle 本地 API 补全通道，支持专用缓存库隔离、串行队列、自动切回与空间熔断。',
+        enabled: true,
+        dependsOn: [
+          '@folio/base-runtime-host',
+          '@folio/base-storage-host',
+          '@folio/base-tasks-host',
+          '@folio/base-thumbs-host',
+          '@folio/workspace-projects-host',
+        ],
+      },
+      {
+        id: 'feature-thumbs-eagle-ui',
+        name: '无缩略图待办与 Eagle 补全',
+        loaderId: '@folio/feature-thumbs-eagle-ui',
+        category: 'feature',
+        slots: [],
+        services: [],
+        description: '在项目库提供无缩略图按后缀分组筛选视图、大文件拷贝二次确认弹窗、Eagle 串行补全与失败重试。',
+        enabled: true,
+        dependsOn: [
+          '@folio/base-ui-kit',
+          '@folio/workspace-projects-ui',
+          '@folio/feature-thumbs-eagle-host',
+        ],
+      },
     ],
     internalExtensions: [
       {

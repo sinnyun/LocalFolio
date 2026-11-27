@@ -6,6 +6,7 @@ export interface NativeThumbOptions {
 
 export interface NativeImageProxyOptions {
   readonly preferPng?: boolean
+  readonly strictWicOnly?: boolean
   readonly signal?: AbortSignal
 }
 

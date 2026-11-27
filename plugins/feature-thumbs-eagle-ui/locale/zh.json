@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "无缩略图待办与 Eagle 补全",
+    "description": "在项目库提供「无缩略图」按后缀分组筛选视图、大文件拷贝二次确认弹窗、Eagle 串行补全进度与失败重试。",
+    "detail": "docs/DETAIL.md"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@folio/feature-thumbs-eagle-host",
+  "version": "0.3.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH host feature plugin providing manual-only L3 Eagle local API thumbnail completion with dedicated cache library isolation, dynamic polling, and space circuit-breaker.",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "lib",
+    "locale",
+    "icon.svg",
+    "docs"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.0"
+  },
+  "devDependencies": {
+    "@folio/base-contract": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "engines": {
+    "dsh": "^0.2.2-rc.5"
+  }
+}

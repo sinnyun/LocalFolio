@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Missing Thumbnails & Eagle Completion",
+    "description": "Adds extension-grouped missing thumbnails backlog, large-file copy confirmation, manual Eagle serial completion, and failed retry controls to Project Library.",
+    "detail": "docs/DETAIL.md"
+  }
+}

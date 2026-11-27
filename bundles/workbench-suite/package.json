@@ -1,6 +1,6 @@
 {
   "name": "@folio/workbench-suite",
-  "version": "0.3.0-alpha.3",
+  "version": "0.3.0-alpha.4",
   "private": true,
   "type": "module",
   "description": "LocalFolio product bundle: base capabilities plus the frame bridge, assembled into one installable suite. Test surfaces ship separately as @folio/test-suite.",
@@ -47,7 +47,9 @@
     "@folio/workspace-projects-host": "link:../../plugins/workspace-projects-host",
     "@folio/workspace-projects-ui": "link:../../plugins/workspace-projects-ui",
     "@folio/feature-archive-host": "link:../../plugins/feature-archive-host",
-    "@folio/feature-archive-ui": "link:../../plugins/feature-archive-ui"
+    "@folio/feature-archive-ui": "link:../../plugins/feature-archive-ui",
+    "@folio/feature-thumbs-eagle-host": "link:../../plugins/feature-thumbs-eagle-host",
+    "@folio/feature-thumbs-eagle-ui": "link:../../plugins/feature-thumbs-eagle-ui"
   },
   "engines": {
     "dsh": "^0.2.2-rc.5"

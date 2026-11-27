@@ -22,13 +22,22 @@ afterEach(async () => {
   )
 })
 
-function createMockNative(): FolioNativeService {
+function createMockNative(options?: {
+  readonly shellExts?: ReadonlySet<string>
+  readonly wicCalls?: string[]
+  readonly shellCalls?: string[]
+}): FolioNativeService {
   const fakeJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10])
+  const shellExts = options?.shellExts ?? new Set(['.cdr', '.mp4', '.pdf'])
   return {
-    async getThumbnail(): Promise<NativeImageProxyResult | null> {
+    async getThumbnail(filePath): Promise<NativeImageProxyResult | null> {
+      options?.shellCalls?.push(filePath)
+      const ext = path.extname(filePath).toLowerCase()
+      if (!shellExts.has(ext)) return null
       return { buffer: fakeJpeg, mime: 'image/jpeg' }
     },
-    async renderImageProxy(): Promise<NativeImageProxyResult | null> {
+    async renderImageProxy(filePath): Promise<NativeImageProxyResult | null> {
+      options?.wicCalls?.push(filePath)
       return { buffer: fakeJpeg, mime: 'image/jpeg' }
     },
     async pickFolder() {
@@ -50,7 +59,101 @@ function createMockNative(): FolioNativeService {
 }
 
 describe('@folio/base-thumbs-host', () => {
-  it('supports built-in SVG/WIC/Shell providers and dynamic custom format providers', async () => {
+  it('supports L0 blacklist, Try-First L1a/L1b catch-all (.cdr), and dynamic custom format providers', async () => {
+    const dataDir = await makeTempDir()
+    const sampleDir = await makeTempDir()
+    const storage = createFolioStorageService({ dataDir })
+    const runtime = createFolioRuntimeService({
+      storage,
+      admit: () => true,
+      trustedOrigins: [],
+    })
+    const tasksHost = registerBaseTasksHost({ runtime })
+    const wicCalls: string[] = []
+    const shellCalls: string[] = []
+    const thumbsHost = registerBaseThumbsHost({
+      runtime,
+      storage,
+      native: createMockNative({ wicCalls, shellCalls }),
+      tasks: tasksHost.service,
+    })
+
+    // L0 misc blacklist -> IGNORED
+    const txtPath = path.join(sampleDir, 'readme.txt')
+    await fsp.writeFile(txtPath, 'hello')
+    expect(thumbsHost.service.isIgnored(txtPath)).toBe(true)
+    expect(thumbsHost.service.isSupported(txtPath)).toBe(false)
+    expect(await thumbsHost.service.generate({ filePath: txtPath, maxDim: 360 })).toBeNull()
+
+    // L1a SVG direct
+    const svgPath = path.join(sampleDir, 'logo.svg')
+    await fsp.writeFile(svgPath, '<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+    const svgRes = await thumbsHost.service.generate({ filePath: svgPath, maxDim: 360 })
+    expect(svgRes?.providerId).toBe('svg-direct')
+    expect(svgRes?.mime).toBe('image/svg+xml')
+
+    // L1a WIC image
+    const jpgPath = path.join(sampleDir, 'photo.jpg')
+    await fsp.writeFile(jpgPath, Buffer.from('fake-jpg'))
+    const jpgRes = await thumbsHost.service.generate({ filePath: jpgPath, maxDim: 360 })
+    expect(jpgRes?.providerId).toBe('win-wic-image')
+    expect(jpgRes?.mime).toBe('image/jpeg')
+
+    // L0 cache hit on repeated call (wicCalls should NOT increase)
+    const wicCountBefore = wicCalls.length
+    const jpgCached = await thumbsHost.service.generate({ filePath: jpgPath, maxDim: 360 })
+    expect(jpgCached?.providerId).toBe('win-wic-image')
+    expect(wicCalls.length).toBe(wicCountBefore)
+
+    // L1b Windows Shell catch-all automatically handles .cdr without whitelist
+    const cdrPath = path.join(sampleDir, 'design.cdr')
+    await fsp.writeFile(cdrPath, Buffer.from('CDR-BINARY'))
+    expect(thumbsHost.service.isSupported(cdrPath)).toBe(true)
+    const cdrRes = await thumbsHost.service.generate({ filePath: cdrPath, maxDim: 360 })
+    expect(cdrRes?.providerId).toBe('win-shell-media')
+    expect(shellCalls).toContain(cdrPath)
+
+    // Unsupported by Shell (.blend) -> MISSING until dynamic custom provider registered
+    const blendPath = path.join(sampleDir, 'scene.blend')
+    await fsp.writeFile(blendPath, Buffer.from('BLENDER-v305'))
+    expect(await thumbsHost.service.generate({ filePath: blendPath, maxDim: 360 })).toBeNull()
+    const [blendStatus] = await thumbsHost.service.queryStatus([blendPath])
+    expect(blendStatus?.status).toBe('MISSING')
+
+    // Dynamic custom provider overrides via priority
+    const fakePng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const disposeBlend = thumbsHost.service.registerProvider({
+      id: 'blend-preview',
+      title: 'Blender 缩略图扩展',
+      priority: 5,
+      extensions: ['blend'],
+      async generate() {
+        return { buffer: fakePng, mime: 'image/png' }
+      },
+    })
+
+    const blendRes = await thumbsHost.service.generate({
+      filePath: blendPath,
+      maxDim: 360,
+      force: true,
+    })
+    expect(blendRes?.providerId).toBe('blend-preview')
+    expect(blendRes?.mime).toBe('image/png')
+
+    const listRes = await runtime.executeAction<{
+      providers: Array<{ id: string; manualOnly: boolean; queueType: string }>
+      ignoredExtensions: string[]
+    }>('thumbs.providers.list', {})
+    expect(listRes.providers.some(p => p.id === 'blend-preview')).toBe(true)
+    expect(listRes.ignoredExtensions).toContain('.txt')
+
+    disposeBlend()
+    thumbsHost.dispose()
+    tasksHost.dispose()
+    runtime.dispose()
+  })
+
+  it('strictly isolates manualOnly Eagle provider and resets deleted Eagle cache to MISSING without auto-triggering', async () => {
     const dataDir = await makeTempDir()
     const sampleDir = await makeTempDir()
     const storage = createFolioStorageService({ dataDir })
@@ -62,64 +165,69 @@ describe('@folio/base-thumbs-host', () => {
     const tasksHost = registerBaseTasksHost({ runtime })
     const thumbsHost = registerBaseThumbsHost({
       runtime,
-      native: createMockNative(),
+      storage,
+      native: createMockNative({ shellExts: new Set() }),
       tasks: tasksHost.service,
     })
 
-    const svgPath = path.join(sampleDir, 'logo.svg')
-    await fsp.writeFile(svgPath, '<svg xmlns="http://www.w3.org/2000/svg"></svg>')
-    const svgRes = await thumbsHost.service.generate({ filePath: svgPath, maxDim: 360 })
-    expect(svgRes?.providerId).toBe('svg-direct')
-    expect(svgRes?.mime).toBe('image/svg+xml')
-
-    const jpgPath = path.join(sampleDir, 'photo.jpg')
-    await fsp.writeFile(jpgPath, Buffer.from('fake-jpg'))
-    const jpgRes = await thumbsHost.service.generate({ filePath: jpgPath, maxDim: 360 })
-    expect(jpgRes?.providerId).toBe('win-wic-image')
-    expect(jpgRes?.mime).toBe('image/jpeg')
-
-    // Unsupported custom extension until dynamically registered
-    const blendPath = path.join(sampleDir, 'scene.blend')
-    await fsp.writeFile(blendPath, Buffer.from('BLENDER-v305'))
-    expect(thumbsHost.service.isSupported(blendPath)).toBe(false)
-    expect(await thumbsHost.service.generate({ filePath: blendPath, maxDim: 360 })).toBeNull()
-
-    // Register high-priority custom .blend provider that falls through if null, plus concrete .blend provider
-    const fakePng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-    const disposeNoop = thumbsHost.service.registerProvider({
-      id: 'blend-noop',
-      priority: 1,
-      extensions: ['.blend'],
-      async generate() {
-        return null
-      },
-    })
-    const disposeBlend = thumbsHost.service.registerProvider({
-      id: 'blend-preview',
-      title: 'Blender 缩略图扩展',
-      priority: 5,
-      extensions: ['blend'],
-      async generate() {
-        return { buffer: fakePng, mime: 'image/png' }
+    let eagleCalls = 0
+    const fakeWebp = Buffer.from('RIFF\x00\x00\x00\x00WEBPVP8 ')
+    thumbsHost.service.registerProvider({
+      id: 'eagle',
+      title: 'Eagle 手动兜底',
+      priority: 200,
+      queueType: 'eagle',
+      manualOnly: true,
+      extensions: ['*'],
+      async generate(req) {
+        eagleCalls += 1
+        if (req.filePath.endsWith('.broken')) return null
+        return { buffer: fakeWebp, mime: 'image/webp' }
       },
     })
 
-    expect(thumbsHost.service.isSupported(blendPath)).toBe(true)
-    expect(thumbsHost.service.listSupportedExtensions()).toContain('.blend')
-    const blendRes = await thumbsHost.service.generate({ filePath: blendPath, maxDim: 360 })
-    expect(blendRes?.providerId).toBe('blend-preview')
-    expect(blendRes?.mime).toBe('image/png')
+    const c4dPath = path.join(sampleDir, 'hero.c4d')
+    const brokenPath = path.join(sampleDir, 'corrupt.broken')
+    const logPath = path.join(sampleDir, 'debug.log')
+    await Promise.all([
+      fsp.writeFile(c4dPath, Buffer.from('C4D')),
+      fsp.writeFile(brokenPath, Buffer.from('BROKEN')),
+      fsp.writeFile(logPath, 'log'),
+    ])
 
-    const listRes = await runtime.executeAction<{
-      providers: Array<{ id: string }>
-      extensions: string[]
-    }>('thumbs.providers.list', {})
-    expect(listRes.providers.some(p => p.id === 'blend-preview')).toBe(true)
-    expect(listRes.extensions).toContain('.blend')
+    // Entry A: auto batch NEVER invokes manualOnly Eagle
+    const batch = await thumbsHost.service.generateAutoBatch([c4dPath, brokenPath, logPath])
+    expect(eagleCalls).toBe(0)
+    expect(batch.ignored.map(i => i.filePath)).toContain(path.resolve(logPath))
+    expect(batch.missing.map(i => i.filePath)).toContain(path.resolve(c4dPath))
+    expect(batch.missing.map(i => i.filePath)).toContain(path.resolve(brokenPath))
 
-    disposeNoop()
-    disposeBlend()
-    expect(thumbsHost.service.isSupported(blendPath)).toBe(false)
+    // Entry B: manual run invokes Eagle serially; success -> READY, failure -> FAILED_EAGLE
+    const manualRes = await thumbsHost.service.generateManual({
+      providerId: 'eagle',
+      filePaths: [c4dPath, brokenPath],
+    })
+    expect(eagleCalls).toBe(2)
+    const c4dEntry = manualRes.find(r => r.filePath === path.resolve(c4dPath))
+    const brokenEntry = manualRes.find(r => r.filePath === path.resolve(brokenPath))
+    expect(c4dEntry?.status).toBe('READY')
+    expect(c4dEntry?.providerId).toBe('eagle')
+    expect(c4dEntry?.cachePath).toBeTruthy()
+    expect(brokenEntry?.status).toBe('FAILED_EAGLE')
+
+    // Delete Eagle cache file on disk -> auto generate MUST reset to MISSING and NEVER auto-invoke Eagle
+    await fsp.unlink(c4dEntry!.cachePath!)
+    const afterDelete = await thumbsHost.service.generate({ filePath: c4dPath })
+    expect(afterDelete).toBeNull()
+    expect(eagleCalls).toBe(2)
+    const [resetStatus] = await thumbsHost.service.queryStatus([c4dPath])
+    expect(resetStatus?.status).toBe('MISSING')
+
+    // Cache stats and clear actions
+    const stats = await thumbsHost.service.getCacheStats()
+    expect(stats.entryCount).toBeGreaterThanOrEqual(3)
+    const cleared = await thumbsHost.service.clearCache()
+    expect(cleared.clearedEntries).toBeGreaterThanOrEqual(3)
 
     thumbsHost.dispose()
     tasksHost.dispose()

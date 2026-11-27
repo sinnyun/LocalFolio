@@ -15,7 +15,8 @@
     "lib",
     "locale",
     "icon.svg",
-    "docs"
+    "docs",
+    "assets"
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.0"

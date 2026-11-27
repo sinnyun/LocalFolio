@@ -1,4 +1,4 @@
-﻿# LocalFolio 套件的 profile 安装 / 实例验证脚本（默认 profile: lfdev，端口: 3081）。
+# LocalFolio 套件的 profile 安装 / 实例验证脚本（默认 profile: lfdev，端口: 3081）。
 # 开发默认装两个聚合元包：
 #   bundles/workbench-suite  产品入口：基础能力 + 桥接 + 正式工作区
 #   bundles/test-suite       六个 test-* 验证界面（产品安装不含它们）
@@ -55,7 +55,8 @@ $ExpectedClientPlugins = @(
   '@folio/feature-canvas-eagle-ui',
   '@folio/workspace-materials-ui',
   '@folio/workspace-projects-ui',
-  '@folio/feature-archive-ui'
+  '@folio/feature-archive-ui',
+  '@folio/feature-thumbs-eagle-ui'
 )
 
 function Invoke-Dsh {

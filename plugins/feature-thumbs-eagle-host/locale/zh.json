@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Eagle 缩略图手动补全（宿主）",
+    "description": "向缩略图引擎注册手动授权专属的 L3 Eagle 本地 API 补全通道，支持专用缓存库隔离、串行队列、自动切回与空间熔断。",
+    "detail": "docs/DETAIL.md"
+  }
+}

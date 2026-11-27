@@ -50,3 +50,7 @@
       name: '@folio/feature-archive-host'
     - id: feature-archive-ui
       name: '@folio/feature-archive-ui'
+    - id: feature-thumbs-eagle-host
+      name: '@folio/feature-thumbs-eagle-host'
+    - id: feature-thumbs-eagle-ui
+      name: '@folio/feature-thumbs-eagle-ui'

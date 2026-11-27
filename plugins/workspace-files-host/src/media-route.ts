@@ -2,7 +2,12 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
-import { FolioError, type FolioRouteHandler } from '@folio/base-contract'
+import {
+  FolioError,
+  type FolioNativeService,
+  type FolioRouteHandler,
+  type FolioThumbsService,
+} from '@folio/base-contract'
 import { classifyFile, isStreamableMediaExt, normalizeBrowsePath } from './classify.js'
 import type { ShellThumbProvider } from './win-thumb.js'
 
@@ -18,7 +23,18 @@ function snapThumbBucket(rawSize: number): number {
   return 512
 }
 
-export function createThumbRouteHandler(thumbProvider: ShellThumbProvider): FolioRouteHandler {
+export interface ThumbRouteHandlerDeps {
+  readonly thumbs?: FolioThumbsService
+  readonly native?: FolioNativeService
+  readonly thumbProvider?: ShellThumbProvider
+}
+
+export function createThumbRouteHandler(
+  depsOrProvider: ShellThumbProvider | ThumbRouteHandlerDeps,
+): FolioRouteHandler {
+  const deps: ThumbRouteHandlerDeps =
+    'getThumbnail' in depsOrProvider ? { thumbProvider: depsOrProvider } : depsOrProvider
+
   return async (request: Request): Promise<Response> => {
     const url = new URL(request.url)
     const rawPath = url.searchParams.get('path')
@@ -49,12 +65,44 @@ export function createThumbRouteHandler(thumbProvider: ShellThumbProvider): Foli
       })
     }
 
-    const png = await thumbProvider.getThumbnail(filePath, bucketSize, {
-      allowIconFallback,
-      signal: request.signal,
-    })
+    let payload: { readonly buffer: Buffer; readonly mime: string } | null = null
 
-    if (!png || png.length === 0) {
+    if (deps.thumbs && st.isFile()) {
+      const rendered = await deps.thumbs
+        .generate({
+          filePath,
+          maxDim: bucketSize,
+          signal: request.signal,
+        })
+        .catch(() => null)
+      if (rendered && rendered.buffer.length > 0) {
+        payload = { buffer: rendered.buffer, mime: rendered.mime }
+      }
+    }
+
+    if (!payload && deps.native && (allowIconFallback || st.isDirectory())) {
+      const nativeRes = await deps.native
+        .getThumbnail(filePath, bucketSize, {
+          allowIconFallback,
+          signal: request.signal,
+        })
+        .catch(() => null)
+      if (nativeRes && nativeRes.buffer.length > 0) {
+        payload = { buffer: nativeRes.buffer, mime: nativeRes.mime }
+      }
+    }
+
+    if (!payload && deps.thumbProvider) {
+      const png = await deps.thumbProvider.getThumbnail(filePath, bucketSize, {
+        allowIconFallback,
+        signal: request.signal,
+      })
+      if (png && png.length > 0) {
+        payload = { buffer: png, mime: 'image/png' }
+      }
+    }
+
+    if (!payload || payload.buffer.length === 0) {
       return new Response(null, {
         status: 204,
         headers: {
@@ -63,11 +111,11 @@ export function createThumbRouteHandler(thumbProvider: ShellThumbProvider): Foli
       })
     }
 
-    return new Response(new Uint8Array(png), {
+    return new Response(new Uint8Array(payload.buffer), {
       status: 200,
       headers: {
-        'content-type': 'image/png',
-        'content-length': String(png.length),
+        'content-type': payload.mime,
+        'content-length': String(payload.buffer.length),
         etag,
         'cache-control': 'private, max-age=300',
         'x-content-type-options': 'nosniff',

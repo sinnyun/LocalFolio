@@ -275,6 +275,11 @@ public static class LfBaseNativeMedia {
   public static string[] Execute(string mode, string path, int size, int flags, bool preferPng) {
     string mime;
     string b64 = null;
+    if (mode == "wic-only") {
+      b64 = TryWicDecode(path, size, preferPng, out mime);
+      if (b64 != null) return new string[] { b64, mime };
+      return null;
+    }
     if (mode == "wic") {
       b64 = TryWicDecode(path, size, preferPng, out mime);
       if (b64 != null) return new string[] { b64, mime };
@@ -331,7 +336,7 @@ interface WorkerResponse {
 
 interface PendingJob {
   readonly id: number
-  readonly mode: 'thumb' | 'wic'
+  readonly mode: 'thumb' | 'wic' | 'wic-only'
   readonly filePath: string
   readonly size: number
   readonly flags: number
@@ -551,7 +556,7 @@ export function createWindowsNativeMediaPool(): NativeMediaPool {
   }
 
   const enqueue = (
-    mode: 'thumb' | 'wic',
+    mode: 'thumb' | 'wic' | 'wic-only',
     filePath: string,
     size: number,
     flags: number,
@@ -609,7 +614,8 @@ export function createWindowsNativeMediaPool(): NativeMediaPool {
     ): Promise<NativeImageProxyResult | null> {
       const clampedDim = Math.max(64, Math.min(2048, Math.round(maxDim)))
       const flags = SIIGBF_BIGGERSIZEOK | SIIGBF_THUMBNAILONLY
-      return enqueue('wic', filePath, clampedDim, flags, Boolean(options.preferPng), options.signal)
+      const mode = options.strictWicOnly ? 'wic-only' : 'wic'
+      return enqueue(mode, filePath, clampedDim, flags, Boolean(options.preferPng), options.signal)
     },
 
     dispose(): void {

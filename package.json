@@ -1,6 +1,6 @@
 {
   "name": "localfolio-monorepo",
-  "version": "0.3.0-alpha.3",
+  "version": "0.3.0-alpha.4",
   "private": true,
   "type": "module",
   "description": "LocalFolio — incremental DSH plugin library and suite monorepo built natively on DeepSeek Harness.",

@@ -6,6 +6,12 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 ---
 
+## 0.3.0-alpha.4
+
+- 升级 `@folio/base-thumbs-host` 缩略图引擎至 v3 架构（方案 B 极致轻量主包）：引入 L0 持久化状态机（优先内置 `node:sqlite` + JSON Store 自动降级与中央 LRU 缓存）、杂项黑名单、三队列并发隔离（`thumbs-fast` / `thumbs-heavy` / `thumbs-eagle`）、L1a/L1b 去白名单化 Try-First 试探与 `>200MB` 重型 PSD/PSB/TIF 避让，以及 L2 ImageMagick 7（内置 `sRGB.icc` + `[0]` 抽层）与 FFmpeg 专项降级。
+- 文件浏览器（`@folio/workspace-files-host`）缩略图路由收口至 `ctx.folioThumbs` + `ctx.folioNative`，消除重复进程池；项目库（`@folio/workspace-projects-host`）移除静态后缀白名单，自动通吃 `.cdr`、`.blend`、`.max` 等本机已装软件格式。
+- 新增 `@folio/feature-thumbs-eagle-host` 与 `@folio/feature-thumbs-eagle-ui`：提供 `manualOnly: true` 硬隔离的 L3 Eagle 本地 API 手动兜底通道（500ms 探活、专用缓存库切换与自动切回、空间熔断），以及项目库「无缩略图」按后缀分组筛选视图、大文件拷贝二次确认与 `FAILED_EAGLE` 手动重试。
+
 ## 0.3.0-alpha.3
 
 - 修复 DSH 在默认 `workspace-write` 沙箱模式下启用工作台时，`base-storage-host` 经由 `ctx.fs` 写入 `%LOCALAPPDATA%\LocalFolio\...` 被拒绝（`file access denied under workspace-write mode`）的问题：插件自有存储统一使用本机原子写（`local-node-fs`），不再受会话 Agent 沙箱策略限制。
@@ -74,6 +80,6 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 | 包 | 版本 |
 |---|---|
-| `localfolio-monorepo`（根）、`@folio/workbench-suite` | `0.3.0-alpha.3` |
+| `localfolio-monorepo`（根）、`@folio/workbench-suite` | `0.3.0-alpha.4` |
 | `@folio/base-storage-host`、`base-runtime-host`、`base-settings-ui`、`test-overview-host` | `0.2.0-alpha.0` |
 | 其余包（含 `@folio/test-suite`） | `0.3.0-alpha.0` |

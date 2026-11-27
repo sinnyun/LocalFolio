@@ -6,6 +6,10 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 ---
 
+## 0.3.0-alpha.8
+
+- 将根包与工作台套件版本同步到 `0.3.0-alpha.8`，确保发布 tag 与归档版本一致。
+
 ## 0.3.0-alpha.6
 
 - 修复 `zpaqfranz backup -chunk` 生成的编号配套文件（`<stem>_00000000_backup.index` 与 `<stem>_00000000_backup.txt`）被扫描器误判为增量新增文件的问题。
@@ -91,6 +95,6 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 | 包 | 版本 |
 |---|---|
-| `localfolio-monorepo`（根）、`@folio/workbench-suite` | `0.3.0-alpha.6` |
+| `localfolio-monorepo`（根）、`@folio/workbench-suite` | `0.3.0-alpha.8` |
 | `@folio/base-storage-host`、`base-runtime-host`、`base-settings-ui`、`test-overview-host` | `0.2.0-alpha.0` |
 | 其余包（含 `@folio/test-suite`） | `0.3.0-alpha.0` |

@@ -1,25 +1,39 @@
 import * as React from 'react'
+import { pageSingleton } from '@/page-singleton'
 
-let portalContainer: HTMLElement | null = null
-const listeners = new Set<() => void>()
+/**
+ * `FolioUiHost` registers the portal root from the `@folio/base-ui-kit` row,
+ * while dialogs, menus and tooltips read it from whichever plugin copy renders
+ * them. A page-level store keeps both sides on the same container after live
+ * code replacement swaps one of them.
+ */
+interface PortalStore {
+  container: HTMLElement | null
+  readonly listeners: Set<() => void>
+}
+
+const store = pageSingleton<PortalStore>('@folio/base-ui-kit/portal-container', () => ({
+  container: null,
+  listeners: new Set(),
+}))
 
 function emit(): void {
-  for (const listener of [...listeners]) listener()
+  for (const listener of [...store.listeners]) listener()
 }
 
 export function setPortalContainer(el: HTMLElement | null): void {
-  if (portalContainer === el) return
-  portalContainer = el
+  if (store.container === el) return
+  store.container = el
   emit()
 }
 
 export function getPortalContainer(): HTMLElement | null {
-  return portalContainer
+  return store.container
 }
 
 export function subscribePortalContainer(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
+  store.listeners.add(listener)
+  return () => store.listeners.delete(listener)
 }
 
 /**

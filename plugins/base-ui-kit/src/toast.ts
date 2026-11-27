@@ -1,41 +1,57 @@
 import * as React from 'react'
 import type { FolioToastInput, FolioToastRecord } from '@folio/base-contract'
+import { pageSingleton } from '@/page-singleton'
 
 const DEFAULT_DURATION_MS = 3600
 const MAX_TOASTS = 5
 
-let nextSeq = 1
-let toastsSnapshot: readonly FolioToastRecord[] = []
-const listeners = new Set<() => void>()
-const timers = new Map<string, ReturnType<typeof setTimeout>>()
+/**
+ * The queue is page state: plugins push through whichever `@folio/base-ui-kit`
+ * copy they resolved, while the single `FolioToaster` subscribes from the copy
+ * mounted on `shell.overlay`. Live code replacement can swap either side, so the
+ * store lives on the page (`pageSingleton`) instead of in module scope.
+ */
+interface ToastStore {
+  nextSeq: number
+  snapshot: readonly FolioToastRecord[]
+  readonly listeners: Set<() => void>
+  readonly timers: Map<string, ReturnType<typeof setTimeout>>
+}
+
+const store = pageSingleton<ToastStore>('@folio/base-ui-kit/toast-store', () => ({
+  nextSeq: 1,
+  snapshot: [],
+  listeners: new Set(),
+  timers: new Map(),
+}))
 
 function emit(): void {
-  for (const listener of [...listeners]) listener()
+  for (const listener of [...store.listeners]) listener()
 }
 
 export function dismissToast(id: string): void {
-  const timer = timers.get(id)
+  const timer = store.timers.get(id)
   if (timer !== undefined) {
     clearTimeout(timer)
-    timers.delete(id)
+    store.timers.delete(id)
   }
-  const next = toastsSnapshot.filter(item => item.id !== id)
-  if (next.length === toastsSnapshot.length) return
-  toastsSnapshot = next
+  const next = store.snapshot.filter(item => item.id !== id)
+  if (next.length === store.snapshot.length) return
+  store.snapshot = next
   emit()
 }
 
 export function clearToasts(): void {
-  for (const timer of timers.values()) clearTimeout(timer)
-  timers.clear()
-  if (toastsSnapshot.length === 0) return
-  toastsSnapshot = []
+  for (const timer of store.timers.values()) clearTimeout(timer)
+  store.timers.clear()
+  if (store.snapshot.length === 0) return
+  store.snapshot = []
   emit()
 }
 
 export function toast(input: FolioToastInput | string): string {
   const normalized: FolioToastInput = typeof input === 'string' ? { title: input } : input
-  const id = normalized.id ?? `lf-toast-${nextSeq++}`
+  const id = normalized.id ?? `lf-toast-${store.nextSeq++}`
   const durationMs = normalized.durationMs ?? DEFAULT_DURATION_MS
   const record: FolioToastRecord = {
     id,
@@ -46,42 +62,42 @@ export function toast(input: FolioToastInput | string): string {
     createdAt: Date.now(),
   }
 
-  const prevTimer = timers.get(id)
+  const prevTimer = store.timers.get(id)
   if (prevTimer !== undefined) {
     clearTimeout(prevTimer)
-    timers.delete(id)
+    store.timers.delete(id)
   }
 
-  const withoutDup = toastsSnapshot.filter(item => item.id !== id)
+  const withoutDup = store.snapshot.filter(item => item.id !== id)
   const next = [...withoutDup, record]
   if (next.length > MAX_TOASTS) {
     const evicted = next.splice(0, next.length - MAX_TOASTS)
     for (const item of evicted) {
-      const t = timers.get(item.id)
+      const t = store.timers.get(item.id)
       if (t !== undefined) {
         clearTimeout(t)
-        timers.delete(item.id)
+        store.timers.delete(item.id)
       }
     }
   }
-  toastsSnapshot = next
+  store.snapshot = next
   emit()
 
   if (durationMs > 0) {
     const timer = setTimeout(() => dismissToast(id), durationMs)
-    timers.set(id, timer)
+    store.timers.set(id, timer)
   }
 
   return id
 }
 
 function getToastsSnapshot(): readonly FolioToastRecord[] {
-  return toastsSnapshot
+  return store.snapshot
 }
 
 function subscribeToasts(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
+  store.listeners.add(listener)
+  return () => store.listeners.delete(listener)
 }
 
 export function useToasts(): readonly FolioToastRecord[] {

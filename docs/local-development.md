@@ -157,6 +157,28 @@ pnpm install --offline --frozen-lockfile --trust-lockfile
 第一条是构建重新生成的共享样式表（被 git 跟踪，内容随 UI 改动变化），属预期；
 第二条是漏进 `lib/` 的产物目录。两者都不影响运行，提交前按需 `git checkout` / 补 `.gitignore`。
 
+### 3.9 左侧面板显示「区域渲染异常」并报 `useSidebar must be used within a SidebarProvider.`
+
+```text
+「materials.workbench:left」区域渲染异常
+useSidebar must be used within a SidebarProvider.
+```
+
+三个工作区（文件浏览器 / 画板 / 物料）同时出现，刷新页面（F5）后消失 → 这是**单次热替换把共享 UI 实例拆成了两份**：
+
+- DSH 的浏览器模块系统按行热替换：`entries.reload` 只清掉被重编包自己的模块记录，其它插件继续用自己工厂运行时抓到的旧导出；
+- 所以「框架那一行装的 `SidebarProvider`」和「工作区那一行渲染的 `SidebarMenuButton`」可能各自持有不同的 React Context 对象。
+
+`CHANGELOG` 的「未发布」段起，`@folio/base-ui-kit` 已把侧栏 Context、Portal 容器、Toast 队列挂到全局符号注册表（`page-singleton.ts`），`SidebarMenuButton` 自带 tooltip Provider，构建脚本也不再重写内容未变的产物，正常情况下不会再复现。
+
+若在更新后的代码上仍然复现，按下面顺序排查（不要先去改业务插件）：
+
+1. `pnpm run build` 是否真的把 `plugins/base-ui-kit/lib/client.js` 更新了（看文件时间；`build:watch` 时看终端是否打了 `rebuilt @folio/base-ui-kit`）；
+2. 浏览器是否还跑着旧页面：点一次 F5 仍然复现，才是代码问题；
+3. `pnpm run test` 里 `plugins/base-ui-kit/src/__tests__/hmr-identity.test.tsx` 是否通过——它专门用两个模块副本复现「只替换一侧」，失败说明 `page-singleton` 或 tooltip 补丁被回退了。
+
+> 热替换的 revision 来自文件的 `mtimeMs` / `ctimeMs` / size，所以「构建了但内容没变」也会触发一次重载；`scripts/build.mjs` 现已在字节相同时跳过写入，`build:watch` 下不会再无谓重载整页插件。
+
 ## 四、隔离调试实例（lfdev，端口 3081）
 
 不影响桌面版，同时挂产品套件和 `test-suite`。可传 `-Port <空闲端口>` 换端口：

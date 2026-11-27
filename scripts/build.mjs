@@ -107,6 +107,11 @@ function wrapClientBundle(pkgName, code) {
 
 function writeAtomic(targetPath, content) {
   fs.mkdirSync(path.dirname(targetPath), { recursive: true })
+  // Rewriting identical bytes still bumps mtime/ctime, and the Host derives each
+  // client row's HMR revision from file metadata: an unchanged rebuild would
+  // replace every plugin row and remount their UI. Leave the artifact (and its
+  // revision) alone when nothing changed.
+  if (fs.existsSync(targetPath) && fs.readFileSync(targetPath, 'utf8') === content) return
   const tmpPath = `${targetPath}.tmp`
   fs.writeFileSync(tmpPath, content)
   fs.renameSync(tmpPath, targetPath)

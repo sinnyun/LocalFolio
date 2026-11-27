@@ -6,9 +6,11 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 ---
 
-## 未发布
+## 0.3.0-alpha.10
 
+- 修复本地构建后热重载时，文件浏览器 / 画板 / 物料工作区左侧面板显示「区域渲染异常」并报 `useSidebar must be used within a SidebarProvider.` 的问题：`@folio/base-ui-kit` 的侧栏 Context、受管 Portal 容器与 Toast 队列改为**页面级单例**（`Symbol.for` 全局符号注册表，见 `page-singleton.ts`），不再随单个插件行被热替换而分叉；`SidebarMenuButton` 的 tooltip 自带 Radix Provider，不再依赖框架那一行的实例；构建脚本对内容未变的产物不再重写，避免一次 `pnpm run build` 因 mtime 变化把每个插件行都热重载一遍。新增回归测试 `plugins/base-ui-kit/src/__tests__/hmr-identity.test.tsx`。
 - 项目库（`@folio/workspace-projects-ui`）新增**项目卡片总览**：默认先以虚拟化卡片网格展示全部库的项目，点击卡片进入项目文件视图并可随时返回；左侧栏在总览时切换为库列表（全部项目 / 单库范围、添加、重新扫描、移除），进入项目后切换为该库的项目列表。总览与项目列表共用搜索、标签/变更筛选、排序、卡片缩放、多选批量管理以及既有 AI / 归档 / 缩略图扩展入口。
+- 将根包与工作台套件版本同步到 `0.3.0-alpha.10`，确保发布 tag 与归档版本一致。
 
 ## 0.3.0-alpha.8
 
@@ -99,6 +101,6 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 | 包 | 版本 |
 |---|---|
-| `localfolio-monorepo`（根）、`@folio/workbench-suite` | `0.3.0-alpha.8` |
+| `localfolio-monorepo`（根）、`@folio/workbench-suite` | `0.3.0-alpha.10` |
 | `@folio/base-storage-host`、`base-runtime-host`、`base-settings-ui`、`test-overview-host` | `0.2.0-alpha.0` |
 | 其余包（含 `@folio/test-suite`） | `0.3.0-alpha.0` |

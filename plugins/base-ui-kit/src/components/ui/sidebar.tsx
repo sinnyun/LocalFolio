@@ -5,6 +5,7 @@ import { PanelLeftIcon } from "lucide-react"
 import { Slot } from "radix-ui"
 
 import { useIsMobile } from "@/hooks/use-mobile"
+import { pageSingleton } from "@/page-singleton"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
@@ -40,7 +41,15 @@ type SidebarContextProps = {
   toggleSidebar: () => void
 }
 
-const SidebarContext = React.createContext<SidebarContextProps | null>(null)
+/**
+ * The frame plugin installs the provider while workspace plugins render the
+ * menu primitives, so this context must stay one object even when live code
+ * replacement swaps only one of those rows (`pageSingleton`).
+ */
+const SidebarContext = pageSingleton<React.Context<SidebarContextProps | null>>(
+  "@folio/base-ui-kit/sidebar-context",
+  () => React.createContext<SidebarContextProps | null>(null)
+)
 
 function useSidebar() {
   const context = React.useContext(SidebarContext)
@@ -537,16 +546,22 @@ const SidebarMenuButton = React.forwardRef<
     }
   }
 
+  // Radix matches its provider by context identity, so a menu button rendered
+  // from a plugin copy that live replacement left behind cannot reuse the
+  // `SidebarProvider`'s tooltip provider. Owning one here keeps the tooltip
+  // working inside any copy; nesting a provider is supported.
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent
-        side="right"
-        align="center"
-        hidden={state !== "collapsed" || isMobile}
-        {...tooltip}
-      />
-    </Tooltip>
+    <TooltipProvider delayDuration={0}>
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent
+          side="right"
+          align="center"
+          hidden={state !== "collapsed" || isMobile}
+          {...tooltip}
+        />
+      </Tooltip>
+    </TooltipProvider>
   )
 })
 

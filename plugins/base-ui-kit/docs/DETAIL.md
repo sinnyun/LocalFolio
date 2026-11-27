@@ -81,10 +81,29 @@ export function apply(ctx: Context): void {
 
 ## 受管 Portal 与 Toast
 
-- Portal 容器是模块级单例（`portal.ts`）：`FolioUiHost` 挂载时 `setPortalContainer(el)`，卸载时置 `null`；React 侧用 `useSyncExternalStore` 订阅，容器为 `null` 时 Radix 回落默认行为（挂 `document.body`），所以「宿主未就绪」不会让弹窗报错。
+- Portal 容器是页面级单例（`portal.ts`，经 `page-singleton.ts` 挂在全局符号注册表上）：`FolioUiHost` 挂载时 `setPortalContainer(el)`，卸载时置 `null`；React 侧用 `useSyncExternalStore` 订阅，容器为 `null` 时 Radix 回落默认行为（挂 `document.body`），所以「宿主未就绪」不会让弹窗报错。
 - 宿主外层是 `position: absolute; inset: 0; pointer-events: none; z-index: 80`，只有具体弹层与 Toast 自己开 `pointer-events: auto`，不会挡住工作台点击。
 - Toast 栈是 `position: fixed; right: 16px; bottom: 36px; z-index: 950`；弹窗遮罩/内容为 900/910，菜单与下拉 920，Tooltip 930。
 - 卸载顺序由 `ctx.effect` 清理函数保证：`clearToasts()` → `setPortalContainer(null)` → 注销槽位 → 注销服务。
+
+## 热重载下的单实例身份
+
+`dsh.client.external` 的「单实例」只在页面首次加载时成立。DSH 的浏览器模块系统按**行**做热替换：`entries.reload` 只清掉被重编包自己的模块记录并重新求值，其它插件继续持有它们各自工厂运行时抓到的旧导出。于是模块作用域里的东西会分叉，两侧互相看不见。
+
+本插件里必须跨插件共享的三样东西因此都放在 `page-singleton.ts`（`Symbol.for` 全局符号注册表，模块被重新求值也不会被清空），第一个创建者写入、之后所有副本复用：
+
+| 状态 | 键 | 为什么会分叉 |
+|---|---|---|
+| `SidebarProvider` 的 React Context | `@folio/base-ui-kit/sidebar-context` | 框架插件装 Provider，工作区插件渲染 `SidebarMenuButton` / `Sidebar*`；只重载一侧就会让 Provider 与消费方各自持有不同的 Context 对象，`useSidebar()` 抛 `useSidebar must be used within a SidebarProvider.` |
+| Portal 容器 | `@folio/base-ui-kit/portal-container` | 宿主由本插件那一行挂载，弹层由业务插件那一行渲染 |
+| Toast 队列 | `@folio/base-ui-kit/toast-store` | 业务插件入队，`FolioToaster` 在宿主那一行订阅 |
+
+另外两处配套约定：
+
+- `SidebarMenuButton` 的 tooltip 自带一个 `TooltipProvider`。Radix 同样按 Context 对象身份匹配 Provider，消费方副本无法复用框架那一行的 Provider；嵌套 Provider 是 Radix 支持的用法。
+- `scripts/build.mjs` 的 `writeAtomic` 在内容字节相同时不写文件。DSH 依据 `mtimeMs` / `ctimeMs` / size 推导每一行的 HMR revision，内容未变的产物若被重写，会让整个页面把每个插件行都重载一遍（状态全丢，且把新旧实例混在同一棵树里）。
+
+回归测试：`src/__tests__/hmr-identity.test.tsx` 用两个独立的模块副本模拟「Provider 一侧被替换、消费方一侧没被替换」，覆盖 Context、Portal、Toast 与注册表本身。
 
 ## 样式体系
 
@@ -122,7 +141,7 @@ pnpm run ui:sync
 - Portal 容器为 `null` 时 Radix 会挂到 `document.body`：SSR/测试环境或宿主尚未挂载时，弹层不在受管容器内。
 - 样式只对带 `data-lf-*` 属性的容器生效：插件在自己的根节点上补 `data-lf-shell` / `data-lf-floating-host` / `data-lf-ui-host` / `data-lf-my-plugins-section` 之一，否则 Tailwind 变量与作用域 reset 不生效。
 - 只提供视觉与弹层基础件，不含数据请求、路由、状态管理；也不得 import 其它功能插件（插件之间只走 Cordis Service 与 Slot）。
-- Toast 队列是模块级内存状态，刷新页面即清空；单条文案只支持 `title` + 一段 `description`。
+- Toast 队列是页面级内存状态（刷新即清空）；单条文案只支持 `title` + 一段 `description`。
 - 图标按需 tree-shake，但组件库整体由本插件一份 bundle 承担；不要把业务组件塞进本包。
 
 ## 验证
@@ -134,3 +153,5 @@ pnpm run verify
 ```
 
 `src/__tests__/ui-kit.test.tsx` 覆盖：`.lf-*` 类名与 `data-variant` / `data-tone` 属性、Radix `Switch` 与 `Tabs` 交互、`Dialog` 渲染进受管 Portal 而非 `document.body`、`toast()` 上屏、以及 `apply()` 注册 `folioUi` 与 `shell.overlay` 宿主并在清理后把 Portal 容器置空。
+
+`src/__tests__/hmr-identity.test.tsx` 覆盖热替换下的一致性（见上一节）。`components/ui/sidebar.tsx` 是有本地补丁的 shadcn 文件（`pageSingleton` 上下文 + 每个 `SidebarMenuButton` 自带的 `TooltipProvider`）：正常改代码不需要碰它，但 `pnpm run ui:add sidebar --overwrite` 会用上游版本覆盖，覆盖后这组测试会立刻失败——按测试恢复补丁即可，不要改测试。

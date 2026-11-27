@@ -61,6 +61,7 @@ export function ProjectsMain(_props: FrameViewProps): React.ReactElement {
   const {
     libraries,
     selectedProject,
+    thumbnailRevision,
     detailLoading,
     projectManifest,
     selectedFile,
@@ -430,6 +431,7 @@ export function ProjectsMain(_props: FrameViewProps): React.ReactElement {
                             selectedProject.id,
                             file.relPath,
                             file.thumbKey,
+                            thumbnailRevision,
                           )
                         : null
                       return (

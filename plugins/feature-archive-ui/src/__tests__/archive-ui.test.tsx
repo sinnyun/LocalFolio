@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FrameController } from '@folio/base-contract'
 import { ProjectsInspector } from '../../../workspace-projects-ui/src/components/ProjectsInspector.js'
 import { ProjectsMain } from '../../../workspace-projects-ui/src/components/ProjectsMain.js'
+import { ProjectsSidebar } from '../../../workspace-projects-ui/src/components/ProjectsSidebar.js'
 import { ProjectsProvider } from '../../../workspace-projects-ui/src/context.js'
 import { createFolioProjectsUiService } from '../../../workspace-projects-ui/src/extension-registry.js'
 import type {
@@ -154,14 +155,19 @@ const toolInstalledStatus: ArchiveToolStatus = {
 
 describe('@folio/feature-archive-ui', () => {
   const fetchSpy = vi.fn()
+  let index: LibraryIndex
 
   beforeEach(() => {
+    index = archivedIndex
     resetArchiveStoreForTests()
     fetchSpy.mockReset()
     fetchSpy.mockImplementation(async (url: string) => {
       const action = decodeURIComponent(String(url).split('/lf/rpc/')[1] ?? '')
       if (action === 'projects.libraries.list') {
-        return new Response(JSON.stringify({ ok: true, data: archivedIndex }), { status: 200 })
+        return new Response(JSON.stringify({ ok: true, data: index }), { status: 200 })
+      }
+      if (action === 'archive.projects.packBatch') {
+        return new Response(JSON.stringify({ ok: true, data: { tasks: [], skippedCount: 0 } }), { status: 200 })
       }
       if (action === 'projects.detail.get') {
         return new Response(JSON.stringify({ ok: true, data: archivedDetail }), { status: 200 })
@@ -286,6 +292,41 @@ describe('@folio/feature-archive-ui', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('selects the entire list and submits only the unarchived projects in list order', async () => {
+    const archived = archivedIndex.projects[0]!
+    index = {
+      ...archivedIndex,
+      projects: [
+        { ...archived, id: 'prj_first', name: 'First', archived: false },
+        archived,
+        { ...archived, id: 'prj_last', name: 'Last', archived: false },
+      ],
+    }
+    const service = createFolioProjectsUiService()
+    service.registerExtension(createArchiveProjectsExtension())
+    render(
+      <ProjectsProvider appId="projects.library" frame={mockFrame} projectsUiService={service}>
+        <ProjectsSidebar appId="projects.library" frame={mockFrame} />
+      </ProjectsProvider>,
+    )
+
+    await screen.findByText('First')
+    fireEvent.click(screen.getByTitle('多选批量管理'))
+    fireEvent.click(screen.getByRole('button', { name: '全选' }))
+    expect(screen.getByText('已选 3 个项目')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '批量归档' }))
+    expect(await screen.findByText(/将 2 个未归档项目/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '开始归档' }))
+    await waitFor(() => {
+      const call = fetchSpy.mock.calls.find(([url]) => String(url).includes('archive.projects.packBatch'))
+      expect(call).toBeTruthy()
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+        projectIds: ['prj_first', 'prj_last'],
+        sourceDisposal: 'recycle',
+      })
+    })
   })
 
   it('mounts onto folioProjects, supports one-click download dialog, file extractTo, archive export, and restore', async () => {

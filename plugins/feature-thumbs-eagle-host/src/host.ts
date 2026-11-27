@@ -49,6 +49,9 @@ export interface ProjectThumbsInspectResult {
   readonly projectName: string
   readonly readyCount: number
   readonly ignoredCount: number
+  readonly pendingCount: number
+  readonly unavailableCount: number
+  readonly archivedItems: readonly { readonly relPath: string; readonly size: number }[]
   readonly missingCount: number
   readonly missingBytes: number
   readonly failedEagleCount: number
@@ -207,7 +210,7 @@ export function registerFeatureThumbsEagleHost(
             throw new FolioError('projects_host_unavailable', '项目库宿主服务未启用', 503)
           }
           const project = await projectsHost.resolveProject(input.projectId)
-          const snapshot = await projectsHost.readProjectSnapshot(input.projectId)
+          const snapshot = await projectsHost.readProjectSnapshot(input.projectId, { includeCachedThumbs: true })
           if (!project || !snapshot) {
             throw new FolioError('project_not_found', `项目不存在: ${input.projectId}`, 404)
           }
@@ -238,9 +241,12 @@ export function registerFeatureThumbsEagleHost(
             size: number
             thumbKey: string
           }> = []
+          const archivedItems: Array<{ relPath: string; size: number }> = []
 
           let readyCount = 0
           let ignoredCount = 0
+          let pendingCount = 0
+          let unavailableCount = 0
           let missingCount = 0
           let missingBytes = 0
 
@@ -250,11 +256,29 @@ export function registerFeatureThumbsEagleHost(
             const st = statuses[i]
             const ext = path.extname(file.name).toLowerCase() || '(无后缀)'
 
-            if (!st || st.status === 'MISSING') {
-              if (thumbs.isIgnored(file.name)) {
-                ignoredCount += 1
-                continue
+            if (file.hasCachedThumb || st?.status === 'READY') {
+              readyCount += 1
+              continue
+            }
+            if (st?.status === 'IGNORED' || thumbs.isIgnored(file.name)) {
+              ignoredCount += 1
+              continue
+            }
+            const source = await fsp.stat(absPath).catch(() => null)
+            if (!source?.isFile()) {
+              if (snapshot.archive?.mode === 'archived' && file.thumbSupported) {
+                archivedItems.push({ relPath: file.relPath, size: file.size })
+              } else {
+                unavailableCount += 1
               }
+              continue
+            }
+            if (!st?.updatedAt) {
+              pendingCount += 1
+              continue
+            }
+
+            if (st.status === 'MISSING') {
               missingCount += 1
               missingBytes += file.size
               let group = groupMap.get(ext)
@@ -271,10 +295,6 @@ export function registerFeatureThumbsEagleHost(
                 size: file.size,
                 thumbKey: file.thumbKey,
               })
-            } else if (st.status === 'READY') {
-              readyCount += 1
-            } else if (st.status === 'IGNORED') {
-              ignoredCount += 1
             } else if (st.status === 'FAILED_EAGLE') {
               failedEagleItems.push({
                 relPath: file.relPath,
@@ -297,6 +317,9 @@ export function registerFeatureThumbsEagleHost(
             projectName: project.name,
             readyCount,
             ignoredCount,
+            pendingCount,
+            unavailableCount,
+            archivedItems,
             missingCount,
             missingBytes,
             failedEagleCount: failedEagleItems.length,
@@ -328,6 +351,7 @@ export function registerFeatureThumbsEagleHost(
             )
           }
 
+          const project = input.projectId ? await projectsHost?.resolveProject(input.projectId) : null
           const handle = tasks.enqueue({
             scope: 'thumbs-eagle',
             queue: 'thumbs-eagle-batch',
@@ -337,6 +361,7 @@ export function registerFeatureThumbsEagleHost(
             cancellable: true,
             meta: {
               projectId: input.projectId ?? null,
+              projectName: project?.name,
               totalFiles: input.filePaths.length,
             },
             run: async helpers => {
@@ -383,11 +408,18 @@ export function registerFeatureThumbsEagleHost(
 
                 runtime.events.emitInvalidate('projects')
                 runtime.events.emitInvalidate('files')
-                return {
+                const result = {
                   total: results.length,
                   ready: results.filter(r => r.status === 'READY').length,
                   failed: results.filter(r => r.status === 'FAILED_EAGLE').length,
                 }
+                helpers.reportProgress({
+                  current: result.total,
+                  total: input.filePaths.length,
+                  message: 'Eagle 缩略图补全结束',
+                  detail: { succeeded: result.ready, failed: result.failed },
+                })
+                return result
               } finally {
                 activeBatchCount = Math.max(0, activeBatchCount - 1)
                 if (

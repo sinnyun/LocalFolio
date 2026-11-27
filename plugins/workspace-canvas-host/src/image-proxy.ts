@@ -4,9 +4,11 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import {
   FolioError,
+  observeTask,
   type FolioFsService,
   type FolioNativeService,
   type FolioRouteHandler,
+  type FolioTasksService,
 } from '@folio/base-contract'
 import { classifyImageFile, normalizeLocalPath } from './image-meta.js'
 import type { CanvasCacheStats } from './types.js'
@@ -130,6 +132,7 @@ export interface CanvasProxyRouteOptions {
   readonly cacheDir: string
   readonly provider: ImageProxyProvider
   readonly fs?: FolioFsService
+  readonly tasks?: FolioTasksService
 }
 
 export function createCanvasProxyRouteHandler(
@@ -258,7 +261,10 @@ export function createCanvasProxyRouteHandler(
     const preferPng = ALPHA_EXTS.has(classified.ext)
     let pending = inflight.get(hash)
     if (!pending) {
-      pending = (async () => {
+      pending = observeTask(options.tasks, {
+        scope: 'canvas', key: 'previews', title: '画板图片预览',
+        item: path.basename(filePath), isSuccessful: Boolean,
+      }, async () => {
         const rendered = await options.provider.renderProxy(filePath, tier, { preferPng })
         if (!rendered || rendered.buffer.length === 0) return null
         const ext = rendered.mime === 'image/png' ? 'png' : 'jpg'
@@ -282,7 +288,7 @@ export function createCanvasProxyRouteHandler(
           // ignore cache write failure
         }
         return rendered
-      })().finally(() => {
+      }).finally(() => {
         inflight.delete(hash)
       })
       inflight.set(hash, pending)

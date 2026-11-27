@@ -371,7 +371,7 @@ function shortenFileNameMiddle(fileName: string, maxLen: number): string {
 export function buildReadableThumbRelPath(
   relPath: string,
   thumbKey: string,
-  ext: 'jpg' | 'png' | 'webp',
+  ext: 'jpg' | 'png' | 'webp' | 'svg',
   projectPath?: string,
 ): string {
   const posixRel = toPosixRelPath(relPath)

@@ -8,12 +8,14 @@ export function buildProjectThumbUrl(
   projectId: string,
   relPath: string,
   thumbKey: string,
+  revision?: string,
 ): string {
   const params = new URLSearchParams({
     projectId,
     relPath,
     tk: thumbKey,
   })
+  if (revision) params.set('rev', revision)
   return `/lf/projects/thumb?${params.toString()}`
 }
 

@@ -1,0 +1,37 @@
+{
+  "name": "@folio/workspace-monitor-ui",
+  "version": "0.3.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "description": "LocalFolio workspace for monitoring background tasks across workspaces and projects.",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@folio/base-ui-kit",
+        "@folio/base-tasks-ui",
+        "@folio/base-shell-ui",
+        "@folio/base-frame-ui"
+      ],
+      "external": ["@folio/base-ui-kit", "@folio/base-tasks-ui"]
+    }
+  },
+  "files": ["lib", "locale", "icon.svg"],
+  "peerDependencies": { "@deepseek-ai/cordis": "^4.0.0", "react": ">=18" },
+  "devDependencies": {
+    "@folio/base-contract": "workspace:*",
+    "@folio/base-ui-kit": "workspace:*",
+    "@folio/base-tasks-ui": "workspace:*",
+    "lucide-react": "^0.511.0"
+  },
+  "engines": { "dsh": "^0.2.2-rc.5" }
+}

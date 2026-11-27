@@ -51,6 +51,7 @@
     "@folio/workspace-materials-ui": "link:../../plugins/workspace-materials-ui",
     "@folio/workspace-projects-host": "link:../../plugins/workspace-projects-host",
     "@folio/workspace-projects-ui": "link:../../plugins/workspace-projects-ui",
+    "@folio/workspace-monitor-ui": "link:../../plugins/workspace-monitor-ui",
     "@folio/feature-archive-host": "link:../../plugins/feature-archive-host",
     "@folio/feature-archive-ui": "link:../../plugins/feature-archive-ui",
     "@folio/feature-thumbs-eagle-host": "link:../../plugins/feature-thumbs-eagle-host",

@@ -50,6 +50,16 @@ export interface TaskHandle<T = unknown> {
   snapshot(): TaskSnapshot
 }
 
+export interface TaskActivityOptions<T> {
+  readonly scope: string
+  readonly key: string
+  readonly title: string
+  readonly item?: string
+  readonly meta?: Record<string, unknown>
+  readonly signal?: AbortSignal
+  readonly isSuccessful?: (result: T) => boolean
+}
+
 export interface BoundedQueue {
   readonly name: string
   readonly concurrency: number
@@ -78,10 +88,19 @@ export interface FolioTasksService {
     options: WorkerRunOptions<TInput>,
   ): Promise<TOutput>
   enqueue<T = unknown>(options: TaskEnqueueOptions<T>): TaskHandle<T>
+  observe<T>(options: TaskActivityOptions<T>, operation: () => Promise<T>): Promise<T>
   listTasks(scope?: string): readonly TaskSnapshot[]
   getTask(id: string): TaskSnapshot | undefined
   pauseTask(id: string): TaskSnapshot
   resumeTask(id: string): TaskSnapshot
   cancelTask(id: string): TaskSnapshot
   clearFinished(scope?: string): number
+}
+
+export function observeTask<T>(
+  tasks: FolioTasksService | undefined,
+  options: TaskActivityOptions<T>,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return tasks ? tasks.observe(options, operation) : operation()
 }

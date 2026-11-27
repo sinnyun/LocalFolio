@@ -9,6 +9,7 @@ import {
   type ManagedFolioRuntime,
 } from '../../../base-runtime-host/src/host.js'
 import { createFolioStorageService } from '../../../base-storage-host/src/host.js'
+import { registerBaseTasksHost } from '../../../base-tasks-host/src/host.js'
 import {
   createWindowsWicImageProxyProvider,
   MAX_IMPORT_BYTES,
@@ -42,6 +43,7 @@ describe('@folio/workspace-canvas-host', () => {
   let sampleRoot: string
   let assetsRoot: string
   let runtime: ManagedFolioRuntime
+  let tasksHost: ReturnType<typeof registerBaseTasksHost>
   let disposeCanvas: () => void
   let proxyCalls: Array<{ filePath: string; tier: number; preferPng?: boolean }>
 
@@ -86,9 +88,11 @@ describe('@folio/workspace-canvas-host', () => {
       admit: req => req.headers['x-test-auth'] === 'ok' || 401,
     })
 
+    tasksHost = registerBaseTasksHost({ runtime })
     disposeCanvas = registerWorkspaceCanvasHost({
       runtime,
       storage,
+      tasks: tasksHost.service,
       fs: createFolioFsService(),
       proxyProvider: stubProxyProvider,
       dialogProvider: stubDialogProvider,
@@ -98,6 +102,7 @@ describe('@folio/workspace-canvas-host', () => {
 
   afterEach(async () => {
     disposeCanvas()
+    tasksHost.dispose()
     runtime.dispose()
     await fsp.rm(tmpDir, { recursive: true, force: true })
   })
@@ -281,6 +286,11 @@ describe('@folio/workspace-canvas-host', () => {
       },
     )
     expect(first.receivedBytes).toBe(half)
+    expect(tasksHost.service.listTasks('canvas')[0]).toMatchObject({
+      queue: 'canvas-import',
+      status: 'running',
+      progress: { current: half, total: TINY_PNG.length },
+    })
 
     await runtime.executeAction('canvas.links.importChunk', {
       importId: begin.importId,
@@ -298,6 +308,7 @@ describe('@folio/workspace-canvas-host', () => {
       naturalWidth: 2,
       naturalHeight: 3,
     })
+    await expect.poll(() => tasksHost.service.listTasks('canvas')[0]?.status).toBe('completed')
     const importsDir = path.join(
       dataDir,
       'plugins',

@@ -63,6 +63,7 @@
 | **画板** | 形态 A（四区） | tldraw 无限画布；图片只存本地文件链接，分层 LOD 代理渲染（256/512/1024/2048），浏览器拖入图片自动导入托管目录，断链检测与批量重定位（[DETAIL](plugins/workspace-canvas-ui/docs/DETAIL.md)） |
 | **物料** | 形态 A（四区） | 关联 A3 横版 `.vectorcraft` 文件；页面多选导出单图/多页 PDF；幻灯片式拖拽排序；物料信息头与 VectorCraft 前台双向同步；默认/项目两套物料数据表（[DETAIL](plugins/workspace-materials-ui/docs/DETAIL.md)） |
 | **项目库** | 形态 A（四区） | 多归档根目录管理、Worker 线程非阻塞扫描、`.folio-meta` 就地元数据与按需双尺寸缩略图缓存、`size+mtimeMs` 增量变更检测、DSH `ctx.llm` 目录采样与 AI 标签/摘要提取、多选批量管理、虚拟滚动列表与可折叠分组虚拟卡片网格（[DETAIL](plugins/workspace-projects-ui/docs/DETAIL.md)） |
+| **任务监控** | 形态 A（中心视图）与跨工作区浮窗 | 按工作区、项目与状态查看当前运行实例的后台任务、子项进度和失败详情。标题栏入口使用可拖动、可缩放悬浮面板。 |
 
 ### 内部扩展
 

@@ -7,6 +7,7 @@ import {
   type FolioRouteHandler,
   type FolioThumbsService,
   type GeneratedThumbMime,
+  type TemporaryProjectThumbSource,
 } from '@folio/base-contract'
 import {
   buildCoverFileName,
@@ -40,10 +41,18 @@ function resolveThumbMime(
   return 'image/jpeg'
 }
 
-function mimeToExt(mime: GeneratedThumbMime): 'jpg' | 'png' | 'webp' {
+function mimeToExt(mime: GeneratedThumbMime): 'jpg' | 'png' | 'webp' | 'svg' {
+  if (mime === 'image/svg+xml') return 'svg'
   if (mime === 'image/png') return 'png'
   if (mime === 'image/webp') return 'webp'
   return 'jpg'
+}
+
+interface EnsureThumbOptions {
+  readonly signal?: AbortSignal
+  readonly hideMetaDir?: boolean
+  readonly projectName?: string
+  readonly acquireSource?: () => Promise<TemporaryProjectThumbSource>
 }
 
 export interface ProjectThumbService {
@@ -58,7 +67,7 @@ export interface ProjectThumbService {
     projectId: string,
     relPath: string,
     thumbKey: string,
-    options?: { readonly signal?: AbortSignal; readonly hideMetaDir?: boolean },
+    options?: EnsureThumbOptions,
   ): Promise<RenderedThumb | null>
   ensureProjectCover(
     projectPath: string,
@@ -82,9 +91,9 @@ export interface ProjectThumbService {
     options?: {
       readonly signal?: AbortSignal
       readonly hideMetaDir?: boolean
-      readonly onProgress?: (done: number, total: number, currentRelPath: string) => void
+      readonly onProgress?: (done: number, total: number, currentRelPath: string, failed: number) => void
     },
-  ): Promise<{ readonly total: number; readonly warmed: number }>
+  ): Promise<{ readonly total: number; readonly warmed: number; readonly failed: number }>
   dispose(): void
 }
 
@@ -102,7 +111,7 @@ export function createProjectThumbService(options: {
     relPath: string,
     thumbKey: string,
   ): Promise<RenderedThumb | null> => {
-    const candidates: Array<{ fileName: string; mime: 'image/jpeg' | 'image/png' | 'image/webp' }> = [
+    const candidates: Array<{ fileName: string; mime: GeneratedThumbMime }> = [
       {
         fileName: buildReadableThumbRelPath(relPath, thumbKey, 'jpg', projectPath),
         mime: 'image/jpeg',
@@ -114,6 +123,10 @@ export function createProjectThumbService(options: {
       {
         fileName: buildReadableThumbRelPath(relPath, thumbKey, 'webp', projectPath),
         mime: 'image/webp',
+      },
+      {
+        fileName: buildReadableThumbRelPath(relPath, thumbKey, 'svg', projectPath),
+        mime: 'image/svg+xml',
       },
       { fileName: `360-${thumbKey}.jpg`, mime: 'image/jpeg' },
       { fileName: `360-${thumbKey}.png`, mime: 'image/png' },
@@ -135,7 +148,7 @@ export function createProjectThumbService(options: {
     projectId: string,
     relPath: string,
     thumbKey: string,
-    opts: { readonly signal?: AbortSignal; readonly hideMetaDir?: boolean } = {},
+    opts: EnsureThumbOptions = {},
   ): Promise<RenderedThumb | null> => {
     const absPath = normalizeProjectPath(path.join(projectPath, relPath))
     if (!isPathInside(projectPath, absPath)) {
@@ -145,49 +158,55 @@ export function createProjectThumbService(options: {
     const cached = await readCachedThumb(projectPath, projectId, relPath, thumbKey)
     if (cached) return cached
 
-    // Graceful no-op when live file is absent on disk (e.g., archived) and cache missed
-    let existsOnDisk = false
-    try {
-      const st = await fsp.stat(absPath)
-      existsOnDisk = st.isFile()
-    } catch {
-      existsOnDisk = false
+    if (!opts.acquireSource) {
+      const source = await fsp.stat(absPath).catch(() => null)
+      if (!source?.isFile()) return null
     }
-    if (!existsOnDisk) return null
+    opts.signal?.throwIfAborted()
 
-    const inflightKey = `${projectId}|360|${thumbKey}`
+    const inflightKey = `${projectId}|360|${thumbKey}|${opts.acquireSource ? 'archive' : 'live'}`
     const existing = inflight.get(inflightKey)
     if (existing) return existing
 
     const ext = path.extname(relPath).toLowerCase()
     const preferPng = isAlphaThumbExt(ext)
-    const pending = thumbs
-      .generate({
-        filePath: absPath,
-        maxDim: THUMB_MAX_DIM,
-        preferPng,
-        signal: opts.signal,
-      })
-      .then(async rendered => {
+    const pending = (async (): Promise<RenderedThumb | null> => {
+      const temporary = await opts.acquireSource?.()
+      try {
+        opts.signal?.throwIfAborted()
+        const rendered = await thumbs.generate({
+          filePath: temporary?.localPath ?? absPath,
+          maxDim: THUMB_MAX_DIM,
+          preferPng,
+          signal: opts.signal,
+          transient: Boolean(temporary),
+          ...(opts.projectName ? {
+            activity: {
+              scope: 'projects',
+              key: `thumbnails:${projectId}`,
+              title: `项目缩略图：${opts.projectName}`,
+              item: relPath,
+              meta: { projectId, projectName: opts.projectName },
+            },
+          } : {}),
+        })
+        opts.signal?.throwIfAborted()
         if (!rendered || rendered.buffer.length === 0) return null
-        if (rendered.mime === 'image/svg+xml') {
-          return {
-            buffer: rendered.buffer,
-            mime: rendered.mime,
-            fileName: buildReadableThumbRelPath(relPath, thumbKey, 'png', projectPath),
-          }
-        }
         const outExt = mimeToExt(rendered.mime)
         const fileName = buildReadableThumbRelPath(relPath, thumbKey, outExt, projectPath)
         await metaStore.writeThumbFile(projectPath, projectId, fileName, rendered.buffer, {
           hideMetaDir: opts.hideMetaDir,
         })
         return { buffer: rendered.buffer, mime: rendered.mime, fileName }
-      })
-      .catch(() => null)
-      .finally(() => {
-        inflight.delete(inflightKey)
-      })
+      } finally {
+        await temporary?.release()
+      }
+    })().catch(err => {
+      if (opts.acquireSource) throw err
+      return null
+    }).finally(() => {
+      inflight.delete(inflightKey)
+    })
 
     inflight.set(inflightKey, pending)
     return pending
@@ -298,9 +317,10 @@ export function createProjectThumbService(options: {
     async warmAllProjectThumbs(projectPath, projectId, files, opts = {}) {
       const targets = files.filter(f => f.thumbSupported)
       const total = targets.length
-      if (total === 0) return { total: 0, warmed: 0 }
+      if (total === 0) return { total: 0, warmed: 0, failed: 0 }
       let done = 0
       let warmed = 0
+      let failed = 0
       await Promise.all(
         targets.map(async file => {
           if (opts.signal?.aborted) return
@@ -311,12 +331,13 @@ export function createProjectThumbService(options: {
               hideMetaDir: opts.hideMetaDir,
             })
             if (res) warmed += 1
+            else if (!opts.signal?.aborted) failed += 1
           }
           done += 1
-          opts.onProgress?.(done, total, file.relPath)
+          opts.onProgress?.(done, total, file.relPath, failed)
         }),
       )
-      return { total, warmed }
+      return { total, warmed, failed }
     },
     dispose(): void {
       inflight.clear()
@@ -390,7 +411,7 @@ export function createProjectThumbRouteHandler(options: {
       if (!buffer || buffer.length === 0) {
         return new Response(null, {
           status: 204,
-          headers: { 'cache-control': 'private, max-age=60' },
+        headers: { 'cache-control': 'no-store' },
         })
       }
 
@@ -433,7 +454,7 @@ export function createProjectThumbRouteHandler(options: {
       projectId,
       relPath,
       thumbKey,
-      { signal: request.signal },
+      { signal: request.signal, projectName: summary.name },
     )
 
     if (!result || result.buffer.length === 0) {

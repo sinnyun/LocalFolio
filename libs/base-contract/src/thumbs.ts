@@ -1,3 +1,5 @@
+import type { TaskActivityOptions } from './tasks.js'
+
 export type GeneratedThumbMime = 'image/jpeg' | 'image/png' | 'image/svg+xml' | 'image/webp'
 
 export type ThumbIndexStatus = 'READY' | 'MISSING' | 'IGNORED' | 'FAILED_EAGLE'
@@ -98,7 +100,9 @@ export interface FolioThumbsService {
     readonly maxDim?: number
     readonly preferPng?: boolean
     readonly force?: boolean
+    readonly transient?: boolean
     readonly signal?: AbortSignal
+    readonly activity?: Omit<TaskActivityOptions<unknown>, 'isSuccessful' | 'signal'>
   }): Promise<GeneratedThumbResult | null>
   generateAutoBatch(
     filePaths: readonly string[],

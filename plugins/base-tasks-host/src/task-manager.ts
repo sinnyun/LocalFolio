@@ -4,6 +4,7 @@ import {
   type BoundedQueue,
   type FolioRuntimeService,
   type FolioTasksService,
+  type TaskActivityOptions,
   type TaskEnqueueOptions,
   type TaskHandle,
   type TaskProgress,
@@ -15,6 +16,7 @@ import { createBoundedQueue } from './queue.js'
 import { runNodeWorker } from './worker-runner.js'
 
 const TERMINAL_STATUSES = new Set<TaskStatus>(['completed', 'failed', 'cancelled'])
+const ACTIVITY_IDLE_MS = 300
 
 function makeAbortError(message = '任务已取消'): Error {
   const err = new Error(message)
@@ -43,6 +45,16 @@ interface InternalTaskRecord {
   lastEmitAt: number
 }
 
+interface ActivityGroup {
+  readonly record: InternalTaskRecord
+  total: number
+  succeeded: number
+  failed: number
+  cancelled: number
+  lastError: string | null
+  timer: ReturnType<typeof setTimeout> | null
+}
+
 export interface CreateFolioTasksServiceOptions {
   readonly runtime: FolioRuntimeService
   readonly throttleMs?: number
@@ -58,10 +70,11 @@ export function createFolioTasksService(
 ): ManagedFolioTasksService {
   const { runtime } = options
   const throttleMs = Math.max(20, options.throttleMs ?? 200)
-  const maxHistory = Math.max(10, options.maxHistory ?? 50)
+  const maxHistory = Math.max(10, options.maxHistory ?? 200)
 
   const tasks = new Map<string, InternalTaskRecord>()
   const queues = new Map<string, BoundedQueue>()
+  const activities = new Map<string, ActivityGroup>()
   let disposed = false
 
   const getOrCreateQueue = (name: string, concurrency?: number): BoundedQueue => {
@@ -135,12 +148,10 @@ export function createFolioTasksService(
     }
   }
 
-  const enqueue = <T = unknown>(opts: TaskEnqueueOptions<T>): TaskHandle<T> => {
-    if (disposed) {
-      throw new FolioError('tasks_disposed', '任务调度器已停止', 503)
-    }
-    const queueName = opts.queue?.trim() || `${opts.scope}:default`
-    const queue = getOrCreateQueue(queueName, opts.concurrency ?? 4)
+  const createRecord = (
+    opts: Pick<TaskEnqueueOptions, 'scope' | 'title' | 'meta' | 'pausable' | 'cancellable'>,
+    queueName: string,
+  ): InternalTaskRecord => {
     const now = Date.now()
     const record: InternalTaskRecord = {
       id: `task_${crypto.randomUUID().slice(0, 12)}`,
@@ -163,6 +174,88 @@ export function createFolioTasksService(
       lastEmitAt: 0,
     }
     tasks.set(record.id, record)
+    return record
+  }
+
+  const observe = async <T>(
+    opts: TaskActivityOptions<T>,
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    if (disposed) return operation()
+    const key = JSON.stringify([opts.scope, opts.key])
+    let group = activities.get(key)
+    const isNew = !group
+    if (!group) {
+      const record = createRecord({ ...opts, pausable: false, cancellable: false }, `activity:${opts.key}`)
+      record.status = 'running'
+      record.startedAt = record.createdAt
+      group = { record, total: 0, succeeded: 0, failed: 0, cancelled: 0, lastError: null, timer: null }
+      activities.set(key, group)
+    }
+    const activity = group
+    const { record } = activity
+    if (activity.timer) clearTimeout(activity.timer)
+    activity.timer = null
+    activity.total += 1
+
+    const updateProgress = (message?: string): void => {
+      const { total, succeeded, failed, cancelled } = activity
+      record.updatedAt = Date.now()
+      record.progress = {
+        current: succeeded + failed + cancelled,
+        total,
+        message,
+        detail: { succeeded, failed, cancelled, lastError: activity.lastError },
+      }
+    }
+    updateProgress(opts.item)
+    if (isNew) emitNow(record)
+    else scheduleThrottledEmit(record)
+
+    try {
+      const result = await operation()
+      if (opts.signal?.aborted) activity.cancelled += 1
+      else if (!opts.isSuccessful || opts.isSuccessful(result)) activity.succeeded += 1
+      else {
+        activity.failed += 1
+        activity.lastError = opts.item ? `${opts.item}：未生成结果` : '未生成结果'
+      }
+      return result
+    } catch (err) {
+      if (opts.signal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        activity.cancelled += 1
+      } else {
+        activity.failed += 1
+        activity.lastError = err instanceof Error ? err.message : String(err)
+      }
+      throw err
+    } finally {
+      if (!disposed) {
+        updateProgress(opts.item)
+        scheduleThrottledEmit(record)
+        if (record.progress.current === activity.total) {
+          activity.timer = setTimeout(() => {
+            activities.delete(key)
+            record.status = activity.succeeded > 0 ? 'completed' : activity.failed > 0 ? 'failed' : 'cancelled'
+            record.error = record.status === 'failed' ? activity.lastError : null
+            record.updatedAt = Date.now()
+            record.finishedAt = record.updatedAt
+            emitNow(record)
+            trimHistory()
+          }, ACTIVITY_IDLE_MS)
+          activity.timer.unref?.()
+        }
+      }
+    }
+  }
+
+  const enqueue = <T = unknown>(opts: TaskEnqueueOptions<T>): TaskHandle<T> => {
+    if (disposed) {
+      throw new FolioError('tasks_disposed', '任务调度器已停止', 503)
+    }
+    const queueName = opts.queue?.trim() || `${opts.scope}:default`
+    const queue = getOrCreateQueue(queueName, opts.concurrency ?? 4)
+    const record = createRecord(opts, queueName)
     emitNow(record)
 
     const waitIfPaused = async (): Promise<void> => {
@@ -280,6 +373,7 @@ export function createFolioTasksService(
       return runNodeWorker<TOutput, TInput>(workerOpts)
     },
     enqueue,
+    observe,
     listTasks(scope?: string): readonly TaskSnapshot[] {
       const list = Array.from(tasks.values())
         .filter(t => !scope || t.scope === scope)
@@ -348,6 +442,10 @@ export function createFolioTasksService(
     dispose(): void {
       if (disposed) return
       disposed = true
+      for (const activity of activities.values()) {
+        if (activity.timer) clearTimeout(activity.timer)
+      }
+      activities.clear()
       for (const record of tasks.values()) {
         if (record.throttleTimer !== null) {
           clearTimeout(record.throttleTimer)

@@ -12,6 +12,6 @@ Optional feature plugin providing the **L3 manual-only Eagle local API** thumbna
 ## Actions
 - `thumbs.eagle.status` — probes Eagle service health and space circuit-breaker state.
 - `thumbs.eagle.settings.update` — configures API URL, cache library path, and space threshold.
-- `thumbs.eagle.project.inspect` — groups a project's `MISSING` files by extension and lists `FAILED_EAGLE` items.
+- `thumbs.eagle.project.inspect` — counts existing project thumbnails, groups local generation misses by extension, and reports untested files, unavailable originals, and Eagle failures.
 - `thumbs.eagle.generate` — enqueues a serial `folioTasks` batch job to complete selected files via Eagle.
 - `thumbs.eagle.cache.reset` — rebuilds the dedicated `ThumbCache.library` when idle.

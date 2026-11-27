@@ -69,6 +69,7 @@ export function createThumbRouteHandler(
           filePath,
           maxDim: bucketSize,
           signal: request.signal,
+          activity: { scope: 'files', key: 'thumbnails', title: '文件浏览器缩略图', item: filePath },
         })
         .catch(() => null)
       if (rendered && rendered.buffer.length > 0) {

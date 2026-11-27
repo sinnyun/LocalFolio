@@ -11,6 +11,7 @@ import { Archive, Download, FolderDown } from 'lucide-react'
 import { Badge, Button } from '@folio/base-ui-kit/client'
 import { ArchiveInspectorSection } from './components/ArchiveInspectorSection.js'
 import { ArchiveToolbarControl } from './components/ArchiveToolbarControl.js'
+import { ArchiveBatchControl } from './components/ArchiveBatchControl.js'
 
 async function extractSingleFileInPlace(
   ctx: ProjectsUiExtensionContext,
@@ -120,6 +121,10 @@ export function createArchiveProjectsExtension(): ProjectsUiExtension {
       return <ArchiveToolbarControl ctx={ctx} />
     },
 
+    renderBatchActions(ctx, selectedProjects) {
+      return <ArchiveBatchControl ctx={ctx} selectedProjects={selectedProjects} />
+    },
+
     renderChangeBannerActions(ctx) {
       const project = ctx.selectedProject
       if (!project) return null
@@ -219,6 +224,16 @@ export function createArchiveProjectsExtension(): ProjectsUiExtension {
       const isArchived = Boolean(project.archived || ctx.projectArchive?.mode === 'archived')
       if (isArchived) {
         return [
+          ...(file.thumbSupported ? [{
+            id: 'archive.rebuildThumb',
+            label: '从归档补缩略图',
+            run: () => enqueueProjectArchiveTask(
+              ctx,
+              'archive.project.rebuildThumbs',
+              { projectId: project.id, relPaths: [file.relPath] },
+              `已提交「${file.name}」归档补图任务`,
+            ),
+          }] : []),
           {
             id: 'archive.extractInPlace',
             label: '提取到项目原位置',

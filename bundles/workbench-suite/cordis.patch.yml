@@ -56,6 +56,8 @@
       name: '@folio/workspace-projects-host'
     - id: workspace-projects-ui
       name: '@folio/workspace-projects-ui'
+    - id: workspace-monitor-ui
+      name: '@folio/workspace-monitor-ui'
     - id: feature-archive-host
       name: '@folio/feature-archive-host'
     - id: feature-archive-ui

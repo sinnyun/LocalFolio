@@ -516,6 +516,23 @@ export function createDefaultPluginManifest(): PluginManifest {
         ],
       },
       {
+        id: 'workspace-monitor-ui',
+        name: '任务监控',
+        loaderId: '@folio/workspace-monitor-ui',
+        category: 'workspace',
+        slots: [],
+        services: [],
+        description: '实时查看各工作区任务、项目进度及失败详情。',
+        enabled: true,
+        dependsOn: [
+          '@folio/base-tasks-host',
+          '@folio/base-tasks-ui',
+          '@folio/base-ui-kit',
+          '@folio/base-shell-ui',
+          '@folio/base-frame-ui',
+        ],
+      },
+      {
         id: 'feature-archive-host',
         name: 'ZPAQ 归档备份后端',
         loaderId: '@folio/feature-archive-host',

@@ -49,6 +49,9 @@ interface ProjectThumbsInspectResult {
   readonly projectName: string
   readonly readyCount: number
   readonly ignoredCount: number
+  readonly pendingCount: number
+  readonly unavailableCount: number
+  readonly archivedItems: readonly { readonly relPath: string; readonly size: number }[]
   readonly missingCount: number
   readonly missingBytes: number
   readonly failedEagleCount: number
@@ -73,12 +76,15 @@ export function MissingThumbsToolbarControl({
   readonly ctx: ProjectsUiExtensionContext
 }): React.ReactElement | null {
   const project = ctx.selectedProject
+  const projectId = project?.id
+  const notify = ctx.notify
   const [open, setOpen] = React.useState(false)
   const [loading, setLoading] = React.useState(false)
   const [submitting, setSubmitting] = React.useState(false)
-  const [inspect, setInspect] = React.useState<ProjectThumbsInspectResult | null>(null)
+  const [inspection, setInspect] = React.useState<ProjectThumbsInspectResult | null>(null)
   const [eagleStatus, setEagleStatus] = React.useState<EagleStatusResult | null>(null)
   const [selectedPaths, setSelectedPaths] = React.useState<Set<string>>(() => new Set())
+  const [selectedArchivePaths, setSelectedArchivePaths] = React.useState<Set<string>>(() => new Set())
   const [expandedExts, setExpandedExts] = React.useState<Set<string>>(() => new Set())
   const [showFailed, setShowFailed] = React.useState(false)
   const [confirmLarge, setConfirmLarge] = React.useState<{
@@ -89,33 +95,41 @@ export function MissingThumbsToolbarControl({
   } | null>(null)
 
   const refreshData = React.useCallback(async () => {
-    if (!project) return
+    if (!projectId) return
     setLoading(true)
     try {
       const [inspectRes, statusRes] = await Promise.all([
         rpcCall<ProjectThumbsInspectResult>('thumbs.eagle.project.inspect', {
-          projectId: project.id,
+          projectId,
         }),
         rpcCall<EagleStatusResult>('thumbs.eagle.status', {}),
       ])
       setInspect(inspectRes)
       setEagleStatus(statusRes)
     } catch (err) {
-      ctx.notify(err instanceof Error ? err.message : '加载无缩略图列表失败', false)
+      notify(err instanceof Error ? err.message : '加载无缩略图列表失败', false)
     } finally {
       setLoading(false)
     }
-  }, [ctx, project])
+  }, [notify, projectId])
 
   React.useEffect(() => {
     setSelectedPaths(new Set())
+    setSelectedArchivePaths(new Set())
     setConfirmLarge(null)
-    if (open && project) {
+  }, [open, projectId])
+
+  React.useEffect(() => {
+    if (open && projectId) {
       void refreshData()
     }
-  }, [open, project?.id, refreshData])
+  }, [open, projectId, refreshData])
 
   if (!project) return null
+  const inspect = inspection?.projectId === project.id ? inspection : null
+  const archivedItems = inspect?.archivedItems ?? []
+  const selectedArchiveItems = archivedItems.filter(item => selectedArchivePaths.has(item.relPath))
+  const archiveSelectedBytes = selectedArchiveItems.reduce((total, item) => total + item.size, 0)
 
   const allMissingMap = new Map<string, MissingFileItem>()
   if (inspect) {
@@ -175,8 +189,28 @@ export function MissingThumbsToolbarControl({
     }
   }
 
+  const executeArchiveBatch = async (): Promise<void> => {
+    if (selectedArchiveItems.length === 0 || submitting) return
+    setSubmitting(true)
+    try {
+      const { task } = await rpcCall<{ task: TaskSnapshot }>('archive.project.rebuildThumbs', {
+        projectId: project.id,
+        relPaths: selectedArchiveItems.map(item => item.relPath),
+      })
+      ctx.onTaskEnqueued(task)
+      ctx.notify(`已提交 ${selectedArchiveItems.length} 个归档文件补图任务`, true)
+      setOpen(false)
+    } catch (err) {
+      ctx.notify(err instanceof Error ? err.message : '归档补图任务启动失败', false)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const selectedMissingPaths = Array.from(selectedPaths).filter(filePath => allMissingMap.has(filePath))
+
   const handleRequestGenerate = (): void => {
-    const picked = Array.from(selectedPaths)
+    const picked = selectedMissingPaths
     if (picked.length === 0) return
     let totalBytes = 0
     let oversizedCount = 0
@@ -215,7 +249,7 @@ export function MissingThumbsToolbarControl({
     }
   }
 
-  const selectedBytes = Array.from(selectedPaths).reduce(
+  const selectedBytes = selectedMissingPaths.reduce(
     (sum, p) => sum + (allMissingMap.get(p)?.size ?? 0),
     0,
   )
@@ -227,13 +261,13 @@ export function MissingThumbsToolbarControl({
         size="sm"
         className="h-7 gap-1.5 px-2 text-xs"
         onClick={() => setOpen(true)}
-        title="查看无缩略图待办并手动使用 Eagle 补全"
+        title="查看缩略图并补图"
       >
         <ImageOff className="h-3.5 w-3.5" />
         <span>无缩略图</span>
-        {inspect && inspect.missingCount > 0 ? (
+        {inspect && inspect.missingCount + archivedItems.length > 0 ? (
           <Badge variant="secondary" className="h-4 px-1 text-[10px]">
-            {inspect.missingCount}
+            {inspect.missingCount + archivedItems.length}
           </Badge>
         ) : null}
       </Button>
@@ -246,7 +280,7 @@ export function MissingThumbsToolbarControl({
               <span>无缩略图待办 · {project.name}</span>
             </DialogTitle>
             <DialogDescription>
-              仅列出本地自动链路（L1~L2）未能出图的文件；纯文本与系统杂项已自动忽略。勾选后可手动调用 Eagle 串行补全。
+              查看项目缓存和本机生成结果，可选用 Eagle 补图，或从归档包为指定文件生成缩略图。
             </DialogDescription>
           </DialogHeader>
 
@@ -308,6 +342,9 @@ export function MissingThumbsToolbarControl({
               <div className="flex flex-wrap items-center gap-3 text-muted-foreground">
                 <span>已有缩略图：{inspect.readyCount}</span>
                 <span>待补全：{inspect.missingCount}（{formatBytes(inspect.missingBytes)}）</span>
+                {inspect.pendingCount > 0 ? <span>尚未尝试生成：{inspect.pendingCount}</span> : null}
+                {archivedItems.length > 0 ? <span>可从归档补图：{archivedItems.length}</span> : null}
+                {inspect.unavailableCount > 0 ? <span>原文件不可用且无缩略图：{inspect.unavailableCount}</span> : null}
                 <span>已忽略杂项：{inspect.ignoredCount}</span>
                 {inspect.failedEagleCount > 0 ? (
                   <span className="text-destructive">Eagle 失败：{inspect.failedEagleCount}</span>
@@ -321,7 +358,7 @@ export function MissingThumbsToolbarControl({
                 <div className="p-6 text-center text-muted-foreground">正在统计项目缩略图状态...</div>
               ) : !inspect || inspect.missingGroups.length === 0 ? (
                 <div className="p-6 text-center text-muted-foreground">
-                  当前项目没有待补全的无缩略图文件。
+                  当前没有待用 Eagle 补图的本地文件。
                 </div>
               ) : (
                 <div className="divide-y">
@@ -389,6 +426,61 @@ export function MissingThumbsToolbarControl({
                 </div>
               )}
             </div>
+
+            {archivedItems.length > 0 ? (
+              <section className="space-y-2 rounded-md border px-3 py-2" aria-label="归档内补缩略图">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium">归档内补缩略图</span>
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedArchiveItems.length === archivedItems.length}
+                      disabled={submitting || loading}
+                      onChange={event => setSelectedArchivePaths(new Set(
+                        event.currentTarget.checked ? archivedItems.map(item => item.relPath) : [],
+                      ))}
+                    />
+                    全选归档文件
+                  </label>
+                </div>
+                <div className="max-h-36 divide-y overflow-y-auto">
+                  {archivedItems.map(item => (
+                    <label key={item.relPath} className="flex items-center gap-2 py-1.5">
+                      <input
+                        type="checkbox"
+                        checked={selectedArchivePaths.has(item.relPath)}
+                        disabled={submitting || loading}
+                        onChange={event => {
+                          const checked = event.currentTarget.checked
+                          setSelectedArchivePaths(prev => {
+                            const next = new Set(prev)
+                            if (checked) next.add(item.relPath)
+                            else next.delete(item.relPath)
+                            return next
+                          })
+                        }}
+                      />
+                      <span className="min-w-0 flex-1 truncate" title={item.relPath}>{item.relPath}</span>
+                      <span className="shrink-0 text-muted-foreground">{formatBytes(item.size)}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-muted-foreground">
+                    已选 {selectedArchiveItems.length} 个（{formatBytes(archiveSelectedBytes)}），逐个临时提取。
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={selectedArchiveItems.length === 0 || submitting || loading}
+                    onClick={() => void executeArchiveBatch()}
+                  >
+                    从归档补缩略图
+                  </Button>
+                </div>
+              </section>
+            ) : null}
 
             {/* Collapsible FAILED_EAGLE Section */}
             {inspect && inspect.failedEagleCount > 0 ? (
@@ -479,7 +571,7 @@ export function MissingThumbsToolbarControl({
 
           <DialogFooter className="flex items-center justify-between sm:justify-between">
             <span className="text-xs text-muted-foreground">
-              已选 {selectedPaths.size} 个文件（{formatBytes(selectedBytes)}）
+              已选 {selectedMissingPaths.length} 个文件（{formatBytes(selectedBytes)}）
             </span>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
@@ -487,7 +579,7 @@ export function MissingThumbsToolbarControl({
               </Button>
               <Button
                 size="sm"
-                disabled={selectedPaths.size === 0 || submitting || !eagleStatus?.online}
+                disabled={selectedMissingPaths.length === 0 || submitting || loading || !eagleStatus?.online}
                 onClick={handleRequestGenerate}
               >
                 <Sparkles className="mr-1.5 h-3.5 w-3.5" />

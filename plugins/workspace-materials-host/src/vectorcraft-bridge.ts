@@ -77,6 +77,7 @@ export interface VectorCraftBridge {
     readonly outputDir: string
     readonly ppi: number
     readonly mergedPdfFileName?: string
+    readonly onProgress?: (done: number, item: string) => void
   }): Promise<readonly ExportedFileItem[]>
   openInGui(filePath: string, artboardIndex?: number): Promise<{ readonly usedExistingControl: boolean }>
   dispose(): void
@@ -642,6 +643,7 @@ export function createRealVectorCraftBridge(
     readonly outputDir: string
     readonly ppi: number
     readonly mergedPdfFileName?: string
+    readonly onProgress?: (done: number, item: string) => void
   }): Promise<readonly ExportedFileItem[]> {
     const cliPath = await requireCliPath()
     const outDir = normalizeLocalPath(options.outputDir)
@@ -662,6 +664,7 @@ export function createRealVectorCraftBridge(
     }
 
     if (options.format === 'pdf-merged') {
+      let donePages = 0
       const byFile = new Map<string, { fileName: string; indices: number[] }>()
       for (const item of options.items) {
         const key = normalizeLocalPath(item.filePath).toLowerCase()
@@ -700,6 +703,8 @@ export function createRealVectorCraftBridge(
           bytes: parsed.bytes ?? 0,
           warnings: parsed.warnings ?? [],
         })
+        donePages += group.indices.length
+        options.onProgress?.(donePages, path.basename(outPath))
       }
       return exported
     }
@@ -735,6 +740,7 @@ export function createRealVectorCraftBridge(
         bytes: parsed.bytes ?? 0,
         warnings: parsed.warnings ?? [],
       })
+      options.onProgress?.(exported.length, path.basename(outPath))
     }
 
     return exported

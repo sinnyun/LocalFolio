@@ -109,6 +109,7 @@ export interface ProjectHostFileInfo {
   readonly fingerprint: string
   readonly thumbKey: string
   readonly thumbSupported: boolean
+  readonly hasCachedThumb?: boolean
 }
 
 export interface ProjectArchivedLiveFileItem {
@@ -163,6 +164,11 @@ export interface ProjectFileResolver {
   ): Promise<{ readonly localPath: string } | null>
 }
 
+export interface TemporaryProjectThumbSource {
+  readonly localPath: string
+  release(): Promise<void>
+}
+
 /**
  * Host Cordis service (`ctx.folioProjectsHost`) provided by `@folio/workspace-projects-host`.
  * Exposes project lookup, thumbnail pre-warming, archive snapshot persistence,
@@ -170,16 +176,20 @@ export interface ProjectFileResolver {
  */
 export interface FolioProjectsHostService {
   resolveProject(projectId: string): Promise<ProjectHostRecord | null>
+  syncProject(projectId: string, signal?: AbortSignal): Promise<void>
   listProjects(): Promise<readonly ProjectHostRecord[]>
-  readProjectSnapshot(projectId: string): Promise<ProjectHostManifestSnapshot | null>
+  readProjectSnapshot(
+    projectId: string,
+    options?: { readonly includeCachedThumbs?: boolean },
+  ): Promise<ProjectHostManifestSnapshot | null>
   warmProjectThumbs(
     projectId: string,
     options?: {
       readonly signal?: AbortSignal
       readonly hideMetaDir?: boolean
-      readonly onProgress?: (done: number, total: number, currentRelPath: string) => void
+      readonly onProgress?: (done: number, total: number, currentRelPath: string, failed: number) => void
     },
-  ): Promise<{ readonly total: number; readonly warmed: number }>
+  ): Promise<{ readonly total: number; readonly warmed: number; readonly failed: number }>
   warmProjectFileThumbs(
     projectId: string,
     relPaths: readonly string[],
@@ -189,6 +199,12 @@ export interface FolioProjectsHostService {
       readonly onProgress?: (done: number, total: number, currentRelPath: string) => void
     },
   ): Promise<{ readonly total: number; readonly warmed: number }>
+  cacheProjectFileThumb(
+    projectId: string,
+    file: Pick<ProjectHostFileInfo, 'relPath' | 'thumbKey'>,
+    acquireSource: () => Promise<TemporaryProjectThumbSource>,
+    options?: { readonly signal?: AbortSignal; readonly hideMetaDir?: boolean },
+  ): Promise<boolean>
   inspectArchivedLiveFiles(projectId: string): Promise<ProjectArchivedLiveInspection>
   commitArchivedDeltaFiles(
     projectId: string,
@@ -255,6 +271,10 @@ export interface ProjectsUiExtension {
   readonly id: string
   readonly order?: number
   renderToolbarActions?(ctx: ProjectsUiExtensionContext): React.ReactNode
+  renderBatchActions?(
+    ctx: ProjectsUiExtensionContext,
+    selectedProjects: readonly ProjectsUiProjectInfo[],
+  ): React.ReactNode
   renderChangeBannerActions?(ctx: ProjectsUiExtensionContext): React.ReactNode
   renderProjectBadges?(
     project: ProjectsUiProjectInfo,

@@ -5,12 +5,15 @@ import { z } from 'zod'
 import {
   FolioError,
   defineAction,
+  observeTask,
   type FolioNativeService,
   type FolioProjectsHostService,
   type FolioRuntimeService,
   type FolioStorageService,
   type FolioTasksService,
   type ProjectArchiveMetaInfo,
+  type ProjectHostRecord,
+  type TaskSnapshot,
 } from '@folio/base-contract'
 import {
   buildDefaultArchiveFileName,
@@ -23,6 +26,7 @@ import {
   ArchiveCompressionMethodSchema,
   ArchiveSourceDisposalSchema,
   type ArchiveMountSessionInfo,
+  type ArchiveSourceDisposal,
   type ArchiveToolStatus,
 } from './types.js'
 
@@ -55,6 +59,7 @@ export function registerFeatureArchiveHost(
     toolManager,
     native,
     runner: options.runner,
+    tasks,
   })
 
   let attachedProjectsHost: FolioProjectsHostService | null = options.projectsHost ?? null
@@ -103,6 +108,7 @@ export function registerFeatureArchiveHost(
         const localPath = await archiveService.ensureExtractedFile({
           projectPath: ctx.project.path,
           projectId: ctx.project.id,
+          projectName: ctx.project.name,
           archiveFileName: ctx.archive.archiveFileName,
           relPath: ctx.relPath,
           thumbKey: ctx.thumbKey ?? 'open',
@@ -115,6 +121,7 @@ export function registerFeatureArchiveHost(
         const localPath = await archiveService.ensureExtractedFile({
           projectPath: ctx.project.path,
           projectId: ctx.project.id,
+          projectName: ctx.project.name,
           archiveFileName: ctx.archive.archiveFileName,
           relPath: ctx.relPath,
           thumbKey: ctx.thumbKey ?? 'media',
@@ -144,6 +151,204 @@ export function registerFeatureArchiveHost(
   if (options.projectsHost) {
     attachProjectsHost(options.projectsHost)
   }
+
+  const requirePackTool = async () => {
+    const binaryPath = await toolManager.requireActiveBinary()
+    const toolStatus = await toolManager.getStatus()
+    if (!toolStatus.supportsChunkBackup) {
+      throw new FolioError(
+        'archive_tool_outdated',
+        `当前 zpaqfranz (${toolStatus.version ?? 'unknown'}) 版本过旧，不支持 -chunk 固定大小分卷（需 ≥ 65.11），请在「归档设置」中一键更新`,
+        400,
+      )
+    }
+    return { binaryPath, settings: toolStatus.settings }
+  }
+
+  const enqueueProjectPack = (
+    projectsHost: FolioProjectsHostService,
+    project: ProjectHostRecord,
+    { binaryPath, settings }: Awaited<ReturnType<typeof requirePackTool>>,
+    sourceDisposal: ArchiveSourceDisposal = settings.defaultSourceDisposal,
+  ): TaskSnapshot => {
+    const handle = tasks.enqueue({
+      scope: 'projects',
+      queue: 'archive-ops',
+      concurrency: 1,
+      pausable: false,
+      cancellable: true,
+      title: `分卷归档打包：${project.name}`,
+      meta: { projectId: project.id, projectName: project.name, mode: 'archive-pack' },
+      run: async helpers => {
+        helpers.throwIfAborted()
+        const currentSnapshot = await projectsHost.readProjectSnapshot(project.id)
+        if (!currentSnapshot) {
+          throw new FolioError('project_not_found', `项目清单不可用: ${project.name}`, 404)
+        }
+        if (currentSnapshot.archive?.mode === 'archived') {
+          helpers.reportProgress({ current: 1, total: 1, message: '项目已归档，已跳过' })
+          return { skipped: true }
+        }
+        await projectsHost.syncProject(project.id, helpers.signal)
+        helpers.throwIfAborted()
+        helpers.reportProgress({
+          current: 5,
+          total: 100,
+          message: '步骤 1/4：预热项目全部 360px 缩略图与封面…',
+        })
+
+        const warmRes = await projectsHost.warmProjectThumbs(project.id, {
+          signal: helpers.signal,
+          hideMetaDir: settings.hideMetaDir,
+          onProgress: (done, total, rel, failed) => {
+            const pct = total > 0 ? 5 + Math.round((done / total) * 30) : 35
+            helpers.reportProgress({
+              current: pct,
+              total: 100,
+              message: `步骤 1/4：生成缩略图 (${done}/${total}) ${path.basename(rel)}`,
+              detail: { succeeded: done - failed, failed },
+            })
+          },
+        })
+        const thumbProgress = { succeeded: warmRes.total - warmRes.failed, failed: warmRes.failed }
+
+        helpers.throwIfAborted()
+        const snapshot = await projectsHost.readProjectSnapshot(project.id)
+        if (!snapshot) {
+          throw new FolioError('project_not_found', `项目清单不可用: ${project.name}`, 404)
+        }
+
+        const archiveFileName =
+          snapshot.archive?.archiveFileName || buildDefaultArchiveFileName(snapshot.name)
+        const entries = await archiveService.collectTopLevelPackEntries(
+          project.path,
+          archiveFileName,
+        )
+        if (entries.length === 0) {
+          throw new FolioError('archive_empty_source', '项目目录中没有可归档的原始文件', 400)
+        }
+
+        helpers.reportProgress({
+          current: 35,
+          total: 100,
+          message: `步骤 2/4：正在按 ${settings.chunkSizeGb}GB/卷 去重打包为 ${archiveFileName}…`,
+          detail: thumbProgress,
+        })
+
+        await archiveService.runner.add({
+          binaryPath,
+          projectPath: project.path,
+          archiveFileName,
+          entries,
+          layout: 'backup-chunk',
+          chunkSizeGb: settings.chunkSizeGb,
+          compressionMethod: settings.compressionMethod,
+          signal: helpers.signal,
+          onProgress: (pct, line) => {
+            const mapped = pct !== null ? 35 + Math.round(pct * 0.4) : 50
+            helpers.reportProgress({
+              current: Math.min(75, mapped),
+              total: 100,
+              message: `步骤 2/4：打包中 ${line}`,
+              detail: thumbProgress,
+            })
+          },
+        })
+
+        helpers.throwIfAborted()
+        helpers.reportProgress({
+          current: 75,
+          total: 100,
+          message: '步骤 3/4：正在校验 .zpaq 分卷归档完整性…',
+          detail: thumbProgress,
+        })
+
+        await archiveService.runner.test({
+          binaryPath,
+          projectPath: project.path,
+          archiveFileName,
+          signal: helpers.signal,
+          onProgress: (pct, line) => {
+            const mapped = pct !== null ? 75 + Math.round(pct * 0.15) : 82
+            helpers.reportProgress({
+              current: Math.min(90, mapped),
+              total: 100,
+              message: `步骤 3/4：校验中 ${line}`,
+              detail: thumbProgress,
+            })
+          },
+        })
+
+        helpers.throwIfAborted()
+        helpers.reportProgress({
+          current: 92,
+          total: 100,
+          detail: thumbProgress,
+          message:
+            sourceDisposal === 'keep'
+              ? '步骤 4/4：保存归档状态（保留源文件）…'
+              : sourceDisposal === 'recycle'
+                ? '步骤 4/4：正在将已归档源文件移入系统回收站…'
+                : '步骤 4/4：正在清理已归档源文件…',
+        })
+
+        const artifacts = await archiveService.listArchiveArtifacts(
+          project.path,
+          archiveFileName,
+        )
+        if (artifacts.volumeFiles.length === 0) {
+          throw new FolioError(
+            'archive_missing',
+            `未检测到已生成的归档分卷文件: ${archiveFileName}`,
+            500,
+          )
+        }
+        helpers.throwIfAborted()
+        const disposed = await archiveService.disposeSourceEntries(
+          project.path,
+          entries,
+          sourceDisposal,
+        )
+        const now = Date.now()
+        const archiveMeta: ProjectArchiveMetaInfo = {
+          mode: 'archived',
+          engine: 'zpaqfranz',
+          archiveFileName,
+          archiveLayout: 'backup-chunk',
+          chunkSizeGb: settings.chunkSizeGb,
+          volumeCount: artifacts.volumeFiles.length,
+          compressionMethod: settings.compressionMethod,
+          archiveBytes: artifacts.totalBytes,
+          originalBytes: snapshot.stats.totalBytes,
+          archivedFileCount: snapshot.stats.fileCount,
+          archivedAt: now,
+          verifiedAt: now,
+          sourceDisposal,
+          versions: (snapshot.archive?.versions ?? 0) + 1,
+        }
+        await projectsHost.updateProjectArchiveMeta(project.id, archiveMeta, {
+          hideMetaDir: settings.hideMetaDir,
+        })
+
+        helpers.reportProgress({
+          current: 100,
+          total: 100,
+          message: `分卷归档完成：${archiveFileName}（共 ${artifacts.volumeFiles.length} 卷，缩略图预热 ${warmRes.warmed} 张）`,
+          detail: thumbProgress,
+        })
+        return { archive: archiveMeta, disposed }
+      },
+    })
+
+    return handle.snapshot()
+  }
+
+  const isPackPending = (projectId: string, snapshots: readonly TaskSnapshot[]): boolean =>
+    snapshots.some(task =>
+      task.meta?.mode === 'archive-pack' &&
+      task.meta.projectId === projectId &&
+      (task.status === 'queued' || task.status === 'running' || task.status === 'paused'),
+    )
 
   const disposers = [
     runtime.registerAction(
@@ -294,173 +499,126 @@ export function registerFeatureArchiveHost(
         }),
         run: async input => {
           const projectsHost = requireProjectsHost()
-          const binaryPath = await toolManager.requireActiveBinary()
-          const toolStatus = await toolManager.getStatus()
-          if (!toolStatus.supportsChunkBackup) {
-            throw new FolioError(
-              'archive_tool_outdated',
-              `当前 zpaqfranz (${toolStatus.version ?? 'unknown'}) 版本过旧，不支持 -chunk 固定大小分卷（需 ≥ 65.11），请在「归档设置」中一键更新`,
-              400,
-            )
-          }
           const project = await projectsHost.resolveProject(input.projectId)
           if (!project) {
             throw new FolioError('project_not_found', `项目不存在: ${input.projectId}`, 404)
           }
-          const settings = toolStatus.settings
-          const sourceDisposal = input.sourceDisposal ?? settings.defaultSourceDisposal
+          const tool = await requirePackTool()
+          if (isPackPending(project.id, tasks.listTasks('projects'))) {
+            throw new FolioError('archive_pack_pending', '项目已在归档队列中', 409)
+          }
+          return { task: enqueueProjectPack(projectsHost, project, tool, input.sourceDisposal) }
+        },
+      }),
+    ),
 
+    runtime.registerAction(
+      defineAction({
+        id: 'archive.projects.packBatch',
+        title: '按顺序将选中的未归档项目加入归档队列',
+        tier: 'modify',
+        input: z.object({
+          projectIds: z.array(z.string().min(1)).min(1),
+          sourceDisposal: ArchiveSourceDisposalSchema.optional(),
+        }),
+        run: async input => {
+          const projectsHost = requireProjectsHost()
+          const projectIds = [...new Set(input.projectIds)]
+          const selected = await Promise.all(projectIds.map(id => projectsHost.resolveProject(id)))
+          const eligible = selected.filter((project): project is ProjectHostRecord => Boolean(project && !project.archived))
+          if (eligible.length === 0) return { tasks: [], skippedCount: projectIds.length }
+
+          const tool = await requirePackTool()
+          const existingTasks = tasks.listTasks('projects')
+          const queued = eligible
+            .filter(project => !isPackPending(project.id, existingTasks))
+            .map(project => enqueueProjectPack(projectsHost, project, tool, input.sourceDisposal))
+          return { tasks: queued, skippedCount: projectIds.length - queued.length }
+        },
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'archive.project.rebuildThumbs',
+        title: '从归档包为选中的文件补缩略图',
+        tier: 'modify',
+        input: z.object({
+          projectId: z.string().min(1),
+          relPaths: z.array(z.string().min(1)).min(1),
+        }),
+        run: async input => {
+          const projectsHost = requireProjectsHost()
+          const project = await projectsHost.resolveProject(input.projectId)
+          const snapshot = await projectsHost.readProjectSnapshot(input.projectId)
+          if (!project || !snapshot) throw new FolioError('project_not_found', '项目不存在', 404)
+          if (snapshot.archive?.mode !== 'archived') {
+            throw new FolioError('not_archived', '当前项目尚未归档', 400)
+          }
+          const filesByPath = new Map(snapshot.files.map(file => [file.relPath, file]))
+          const selected = [...new Set(input.relPaths)].map(relPath => {
+            const file = filesByPath.get(relPath)
+            if (!file?.thumbSupported) {
+              throw new FolioError('invalid_thumb_target', `文件不在归档清单中或不支持缩略图: ${relPath}`, 400)
+            }
+            return file
+          })
           const handle = tasks.enqueue({
             scope: 'projects',
             queue: 'archive-ops',
             concurrency: 1,
             pausable: false,
             cancellable: true,
-            title: `分卷归档打包：${project.name}`,
-            meta: { projectId: project.id, mode: 'archive-pack' },
+            title: `归档内补缩略图：${project.name}`,
+            meta: { projectId: project.id, projectName: project.name, mode: 'archive-thumbs' },
             run: async helpers => {
-              helpers.throwIfAborted()
-              helpers.reportProgress({
-                current: 5,
-                total: 100,
-                message: '步骤 1/4：预热项目全部 360px 缩略图与封面…',
-              })
-
-              const warmRes = await projectsHost.warmProjectThumbs(project.id, {
-                signal: helpers.signal,
-                hideMetaDir: settings.hideMetaDir,
-                onProgress: (done, total, rel) => {
-                  const pct = total > 0 ? 5 + Math.round((done / total) * 30) : 35
-                  helpers.reportProgress({
-                    current: pct,
-                    total: 100,
-                    message: `步骤 1/4：生成缩略图 (${done}/${total}) ${path.basename(rel)}`,
-                  })
-                },
-              })
-
-              helpers.throwIfAborted()
-              const snapshot = await projectsHost.readProjectSnapshot(project.id)
-              if (!snapshot) {
-                throw new FolioError('project_not_found', `项目清单不可用: ${project.name}`, 404)
+              const current = await projectsHost.readProjectSnapshot(project.id)
+              if (current?.archive?.mode !== 'archived' || current.archive.versions !== snapshot.archive?.versions ||
+                  current.archive.archiveFileName !== snapshot.archive?.archiveFileName) {
+                throw new FolioError('archive_changed', '归档已变更，请刷新项目后重试', 409)
               }
+              const archiveFileName = current.archive.archiveFileName
+              const currentByPath = new Map(current.files.map(file => [file.relPath, file.thumbKey]))
+              const { hideMetaDir } = await toolManager.getSettings()
+              let succeeded = 0
+              let failed = 0
+              let lastError: string | null = null
+              const report = (message: string) => helpers.reportProgress({
+                current: succeeded + failed,
+                total: selected.length,
+                message,
+                detail: { succeeded, failed, lastError },
+              })
 
-              const archiveFileName =
-                snapshot.archive?.archiveFileName || buildDefaultArchiveFileName(snapshot.name)
-              const entries = await archiveService.collectTopLevelPackEntries(
-                project.path,
-                archiveFileName,
-              )
-              if (entries.length === 0) {
-                throw new FolioError('archive_empty_source', '项目目录中没有可归档的原始文件', 400)
+              for (const file of selected) {
+                helpers.throwIfAborted()
+                report(`正在补图：${file.relPath}`)
+                try {
+                  if (currentByPath.get(file.relPath) !== file.thumbKey) {
+                    throw new Error('归档文件记录已变更')
+                  }
+                  const ready = await projectsHost.cacheProjectFileThumb(project.id, file, () =>
+                    archiveService.extractTemporaryThumbSource({
+                      projectPath: project.path,
+                      archiveFileName,
+                      relPath: file.relPath,
+                      signal: helpers.signal,
+                    }), { signal: helpers.signal, hideMetaDir })
+                  if (!ready) throw new Error('本机取图链路未生成缩略图')
+                  succeeded += 1
+                } catch (err) {
+                  helpers.throwIfAborted()
+                  failed += 1
+                  lastError = `${file.relPath}：${err instanceof Error ? err.message : String(err)}`
+                }
+                report(`已处理 ${succeeded + failed}/${selected.length} 个文件`)
               }
-
-              helpers.reportProgress({
-                current: 35,
-                total: 100,
-                message: `步骤 2/4：正在按 ${settings.chunkSizeGb}GB/卷 去重打包为 ${archiveFileName}…`,
-              })
-
-              await archiveService.runner.add({
-                binaryPath,
-                projectPath: project.path,
-                archiveFileName,
-                entries,
-                layout: 'backup-chunk',
-                chunkSizeGb: settings.chunkSizeGb,
-                compressionMethod: settings.compressionMethod,
-                signal: helpers.signal,
-                onProgress: (pct, line) => {
-                  const mapped = pct !== null ? 35 + Math.round(pct * 0.4) : 50
-                  helpers.reportProgress({
-                    current: Math.min(75, mapped),
-                    total: 100,
-                    message: `步骤 2/4：打包中 ${line}`,
-                  })
-                },
-              })
-
-              helpers.throwIfAborted()
-              helpers.reportProgress({
-                current: 75,
-                total: 100,
-                message: '步骤 3/4：正在校验 .zpaq 分卷归档完整性…',
-              })
-
-              await archiveService.runner.test({
-                binaryPath,
-                projectPath: project.path,
-                archiveFileName,
-                signal: helpers.signal,
-                onProgress: (pct, line) => {
-                  const mapped = pct !== null ? 75 + Math.round(pct * 0.15) : 82
-                  helpers.reportProgress({
-                    current: Math.min(90, mapped),
-                    total: 100,
-                    message: `步骤 3/4：校验中 ${line}`,
-                  })
-                },
-              })
-
-              helpers.throwIfAborted()
-              helpers.reportProgress({
-                current: 92,
-                total: 100,
-                message:
-                  sourceDisposal === 'keep'
-                    ? '步骤 4/4：保存归档状态（保留源文件）…'
-                    : sourceDisposal === 'recycle'
-                      ? '步骤 4/4：正在将已归档源文件移入系统回收站…'
-                      : '步骤 4/4：正在清理已归档源文件…',
-              })
-
-              const disposed = await archiveService.disposeSourceEntries(
-                project.path,
-                entries,
-                sourceDisposal,
-              )
-
-              const artifacts = await archiveService.listArchiveArtifacts(
-                project.path,
-                archiveFileName,
-              )
-              if (artifacts.volumeFiles.length === 0) {
-                throw new FolioError(
-                  'archive_missing',
-                  `未检测到已生成的归档分卷文件: ${archiveFileName}`,
-                  500,
-                )
+              if (succeeded === 0 && lastError) {
+                throw new FolioError('archive_thumbs_failed', lastError, 422)
               }
-              const now = Date.now()
-              const archiveMeta: ProjectArchiveMetaInfo = {
-                mode: 'archived',
-                engine: 'zpaqfranz',
-                archiveFileName,
-                archiveLayout: 'backup-chunk',
-                chunkSizeGb: settings.chunkSizeGb,
-                volumeCount: artifacts.volumeFiles.length,
-                compressionMethod: settings.compressionMethod,
-                archiveBytes: artifacts.totalBytes,
-                originalBytes: snapshot.stats.totalBytes,
-                archivedFileCount: snapshot.stats.fileCount,
-                archivedAt: now,
-                verifiedAt: now,
-                sourceDisposal,
-                versions: (snapshot.archive?.versions ?? 0) + 1,
-              }
-              await projectsHost.updateProjectArchiveMeta(project.id, archiveMeta, {
-                hideMetaDir: settings.hideMetaDir,
-              })
-
-              helpers.reportProgress({
-                current: 100,
-                total: 100,
-                message: `分卷归档完成：${archiveFileName}（共 ${artifacts.volumeFiles.length} 卷，缩略图预热 ${warmRes.warmed} 张）`,
-              })
-              return { archive: archiveMeta, disposed }
+              return { succeeded, failed }
             },
           })
-
           return { task: handle.snapshot() }
         },
       }),
@@ -494,7 +652,7 @@ export function registerFeatureArchiveHost(
             pausable: false,
             cancellable: true,
             title: `校验归档：${project.name}`,
-            meta: { projectId: project.id, mode: 'archive-verify' },
+            meta: { projectId: project.id, projectName: project.name, mode: 'archive-verify' },
             run: async helpers => {
               helpers.reportProgress({
                 current: 10,
@@ -582,7 +740,7 @@ export function registerFeatureArchiveHost(
               : resolvedMode === 'extract_all_keep_archive'
                 ? `全部提取（保留包）：${project.name}`
                 : `解包还原并移除包：${project.name}`,
-            meta: { projectId: project.id, mode: 'archive-restore', resolvedMode },
+            meta: { projectId: project.id, projectName: project.name, mode: 'archive-restore', resolvedMode },
             run: async helpers => {
               helpers.reportProgress({
                 current: 10,
@@ -864,7 +1022,7 @@ export function registerFeatureArchiveHost(
             pausable: false,
             cancellable: true,
             title: `增量追加归档：${project.name}`,
-            meta: { projectId: project.id, mode: 'archive-append' },
+            meta: { projectId: project.id, projectName: project.name, mode: 'archive-append' },
             run: async helpers => {
               helpers.throwIfAborted()
               const inspection = await projectsHost.inspectArchivedLiveFiles(project.id)
@@ -1057,11 +1215,15 @@ export function registerFeatureArchiveHost(
             throw new FolioError('not_found', `文件不在归档清单中: ${input.relPath}`, 404)
           }
 
-          const extracted = await archiveService.extractFileInPlace({
+          const archiveFileName = snapshot.archive.archiveFileName
+          const extracted = await observeTask(tasks, {
+            scope: 'projects', key: `extract:${project.id}`, title: `归档文件提取：${project.name}`,
+            item: input.relPath, meta: { projectId: project.id, projectName: project.name },
+          }, () => archiveService.extractFileInPlace({
             projectPath: project.path,
-            archiveFileName: snapshot.archive.archiveFileName,
+            archiveFileName,
             relPath: input.relPath,
-          })
+          }))
 
           const settings = await toolManager.getSettings()
           const prevList = snapshot.archive.extractedFiles ?? []
@@ -1126,12 +1288,15 @@ export function registerFeatureArchiveHost(
             destDir = pick.folderPath
           }
 
-          const extractedPath = await archiveService.extractFileToDestination({
+          const extractedPath = await observeTask(tasks, {
+            scope: 'projects', key: `extract:${project.id}`, title: `归档文件提取：${project.name}`,
+            item: input.relPath, meta: { projectId: project.id, projectName: project.name },
+          }, () => archiveService.extractFileToDestination({
             projectPath: project.path,
             archiveFileName,
             relPath: input.relPath,
             destDir,
-          })
+          }))
 
           if (input.reveal) {
             await native.revealPath(extractedPath).catch(() => {})
@@ -1174,11 +1339,15 @@ export function registerFeatureArchiveHost(
             destDir = pick.folderPath
           }
 
-          const exported = await archiveService.exportArchiveToDestination({
+          const archiveFileName = snapshot.archive.archiveFileName
+          const exported = await observeTask(tasks, {
+            scope: 'projects', key: `archive-export:${project.id}`, title: `导出归档包：${project.name}`,
+            item: archiveFileName, meta: { projectId: project.id, projectName: project.name },
+          }, () => archiveService.exportArchiveToDestination({
             projectPath: project.path,
-            archiveFileName: snapshot.archive.archiveFileName,
+            archiveFileName,
             destDir,
-          })
+          }))
 
           if (input.reveal) {
             await native.revealPath(exported.exportedPath).catch(() => {})

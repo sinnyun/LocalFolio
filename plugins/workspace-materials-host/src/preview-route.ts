@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { FolioError, type FolioFsService, type FolioRouteHandler } from '@folio/base-contract'
+import { FolioError, observeTask, type FolioFsService, type FolioRouteHandler, type FolioTasksService } from '@folio/base-contract'
 import { normalizeLocalPath } from './dialogs.js'
 import type { VectorCraftBridge } from './vectorcraft-bridge.js'
 
@@ -13,6 +13,7 @@ export interface CreateMaterialsPreviewRouteOptions {
   readonly cacheDir: string
   readonly bridge: VectorCraftBridge
   readonly fs?: FolioFsService
+  readonly tasks?: FolioTasksService
 }
 
 function clampPpi(raw: number): number {
@@ -124,7 +125,10 @@ export function createMaterialsPreviewRouteHandler(
 
     let pending = inflight.get(key)
     if (!pending) {
-      pending = withRenderSlot(async () => {
+      pending = observeTask(options.tasks, {
+        scope: 'materials', key: 'previews', title: '物料页面预览',
+        item: `${path.basename(filePath)} · ${artboard + 1}`, isSuccessful: Boolean,
+      }, () => withRenderSlot(async () => {
         await fsp.mkdir(previewDir, { recursive: true })
         const tmpFile = `${cacheFile}.${process.pid}.${Date.now()}.tmp.png`
         try {
@@ -143,7 +147,7 @@ export function createMaterialsPreviewRouteHandler(
           await fsp.unlink(tmpFile).catch(() => {})
           throw err
         }
-      }).finally(() => {
+      })).finally(() => {
         inflight.delete(key)
       })
       inflight.set(key, pending)

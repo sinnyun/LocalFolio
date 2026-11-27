@@ -5,6 +5,7 @@ import { z } from 'zod'
 import {
   FolioError,
   defineAction,
+  type TaskActivityOptions,
   type BoundedQueue,
   type FolioNativeService,
   type FolioRuntimeService,
@@ -35,6 +36,8 @@ import {
 } from './index-store.js'
 import { createBuiltinThumbProviders } from './providers.js'
 import { createThumbToolRegistry, type ThumbToolRegistry } from './tools.js'
+
+const MISSING_RETRY_MS = 5 * 60_000
 
 export interface CreateFolioThumbsServiceOptions {
   readonly native: FolioNativeService
@@ -211,7 +214,9 @@ export function createFolioThumbsService(
     readonly maxDim?: number
     readonly preferPng?: boolean
     readonly force?: boolean
+    readonly transient?: boolean
     readonly signal?: AbortSignal
+    readonly activity?: Omit<TaskActivityOptions<unknown>, 'isSuccessful' | 'signal'>
   }): Promise<{
     readonly result: GeneratedThumbResult | null
     readonly record: ThumbIndexRecord
@@ -244,7 +249,7 @@ export function createFolioThumbsService(
         fileSize,
         updatedAt: now,
       }
-      await indexStore.upsert(ignoredRec)
+      if (!reqOptions.transient) await indexStore.upsert(ignoredRec)
       return { result: null, record: ignoredRec }
     }
 
@@ -265,12 +270,15 @@ export function createFolioThumbsService(
     }
 
     // L0-2: Idempotency check against persisted index
-    const existing = await indexStore.get(filePath)
+    const existing = reqOptions.transient ? null : await indexStore.get(filePath)
     if (existing && existing.fingerprint === fingerprint && !reqOptions.force) {
       if (existing.status === 'IGNORED') {
         return { result: null, record: existing }
       }
-      if (existing.status === 'MISSING' || existing.status === 'FAILED_EAGLE') {
+      if (
+        existing.status === 'FAILED_EAGLE' ||
+        (existing.status === 'MISSING' && now - existing.updatedAt < MISSING_RETRY_MS)
+      ) {
         return { result: null, record: existing }
       }
       if (existing.status === 'READY') {
@@ -318,57 +326,67 @@ export function createFolioThumbsService(
     }
     const candidates = matchingAutoProvidersFor(req)
 
-    for (const provider of candidates) {
-      if (reqOptions.signal?.aborted) break
-      const res = await runProviderInLane(provider, req)
-      if (res && res.buffer.length > 0) {
-        const cacheRel = await indexStore.writeCacheFile({
-          filePath,
-          fingerprint,
-          maxDim,
-          mime: res.mime,
-          buffer: res.buffer,
-        })
-        const readyRec: ThumbIndexRecord = {
-          filePath,
-          canonicalKey,
-          fingerprint,
-          status: 'READY',
-          providerId: provider.id,
-          thumbPath: cacheRel,
-          mime: res.mime,
-          ext,
-          fileSize,
-          updatedAt: Date.now(),
-        }
-        await indexStore.upsert(readyRec)
-        return {
-          result: {
-            buffer: res.buffer,
+    const run = async () => {
+      for (const provider of candidates) {
+        if (reqOptions.signal?.aborted) break
+        const res = await runProviderInLane(provider, req)
+        if (res && res.buffer.length > 0) {
+          const cacheRel = reqOptions.transient ? null : await indexStore.writeCacheFile({
+            filePath,
+            fingerprint,
+            maxDim,
             mime: res.mime,
+            buffer: res.buffer,
+          })
+          const readyRec: ThumbIndexRecord = {
+            filePath,
+            canonicalKey,
+            fingerprint,
+            status: 'READY',
             providerId: provider.id,
-            cachePath: cacheRel ? resolveAbsCachePath(cacheRel) : null,
-          },
-          record: readyRec,
+            thumbPath: cacheRel,
+            mime: res.mime,
+            ext,
+            fileSize,
+            updatedAt: Date.now(),
+          }
+          if (!reqOptions.transient) await indexStore.upsert(readyRec)
+          return {
+            result: {
+              buffer: res.buffer,
+              mime: res.mime,
+              providerId: provider.id,
+              cachePath: cacheRel ? resolveAbsCachePath(cacheRel) : null,
+            },
+            record: readyRec,
+          }
         }
       }
-    }
 
-    // Auto pipeline exhausted -> MISSING
-    const missingRec: ThumbIndexRecord = {
-      filePath,
-      canonicalKey,
-      fingerprint,
-      status: 'MISSING',
-      providerId: null,
-      thumbPath: null,
-      mime: null,
-      ext,
-      fileSize,
-      updatedAt: Date.now(),
+      // Auto pipeline exhausted -> MISSING
+      const missingRec: ThumbIndexRecord = {
+        filePath,
+        canonicalKey,
+        fingerprint,
+        status: 'MISSING',
+        providerId: null,
+        thumbPath: null,
+        mime: null,
+        ext,
+        fileSize,
+        updatedAt: Date.now(),
+      }
+      if (!reqOptions.transient && !reqOptions.signal?.aborted) await indexStore.upsert(missingRec)
+      return { result: null, record: missingRec }
     }
-    await indexStore.upsert(missingRec)
-    return { result: null, record: missingRec }
+    if (reqOptions.activity && !reqOptions.signal?.aborted) {
+      return options.tasks.observe({
+        ...reqOptions.activity,
+        signal: reqOptions.signal,
+        isSuccessful: outcome => Boolean(outcome.result),
+      }, run)
+    }
+    return run()
   }
 
   const generate = async (reqOptions: {
@@ -376,7 +394,9 @@ export function createFolioThumbsService(
     readonly maxDim?: number
     readonly preferPng?: boolean
     readonly force?: boolean
+    readonly transient?: boolean
     readonly signal?: AbortSignal
+    readonly activity?: Omit<TaskActivityOptions<unknown>, 'isSuccessful' | 'signal'>
   }): Promise<GeneratedThumbResult | null> => {
     const { result } = await generateWithRecord(reqOptions)
     return result
@@ -473,7 +493,7 @@ export function createFolioThumbsService(
         mime: null,
         ext,
         fileSize,
-        updatedAt: existing?.updatedAt ?? 0,
+        updatedAt: 0,
       })
     }
     return results
@@ -666,11 +686,29 @@ export function registerBaseThumbsHost(options: RegisterBaseThumbsHostOptions): 
           maxDim: z.number().int().positive().max(1024).optional(),
           force: z.boolean().optional(),
         }),
-        run: async input =>
-          service.generateAutoBatch(input.filePaths, {
-            maxDim: input.maxDim,
-            force: input.force,
-          }),
+        run: async input => options.tasks.enqueue({
+          scope: 'thumbs',
+          title: `批量生成缩略图（${input.filePaths.length} 个文件）`,
+          queue: 'thumbs-auto-batch',
+          concurrency: 1,
+          pausable: false,
+          run: async helpers => {
+            const result = await service.generateAutoBatch(input.filePaths, {
+              maxDim: input.maxDim,
+              force: input.force,
+              signal: helpers.signal,
+              onProgress: (current, total, filePath) => {
+                helpers.reportProgress({ current, total, message: path.basename(filePath) })
+              },
+            })
+            helpers.reportProgress({
+              current: input.filePaths.length,
+              total: input.filePaths.length,
+              detail: { succeeded: result.ready.length, failed: result.missing.length, ignored: result.ignored.length },
+            })
+            return result
+          },
+        }).done,
       }),
     ),
 

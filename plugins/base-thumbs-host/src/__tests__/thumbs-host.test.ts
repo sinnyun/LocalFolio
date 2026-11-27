@@ -1,7 +1,7 @@
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FolioNativeService, NativeImageProxyResult } from '@folio/base-contract'
 import { createFolioRuntimeService } from '../../../base-runtime-host/src/host.js'
 import { createFolioStorageService } from '../../../base-storage-host/src/host.js'
@@ -59,6 +59,80 @@ function createMockNative(options?: {
 }
 
 describe('@folio/base-thumbs-host', () => {
+  it.each([['psd', 1], ['psb', 2]] as const)(
+    'reads an embedded JPEG from a %s before invoking the Windows provider',
+    async (ext, version) => {
+      const dir = await makeTempDir()
+      const filePath = path.join(dir, `large.${ext}`)
+      const jpeg = Buffer.from('ffd8ffe000104a46494600010100000100010000ffd9', 'hex')
+      const header = Buffer.alloc(34)
+      header.write('8BPS')
+      header.writeUInt16BE(version, 4)
+      const block = Buffer.alloc(12 + 28 + jpeg.length + (jpeg.length % 2))
+      block.write('8BIM')
+      block.writeUInt16BE(1036, 4)
+      block.writeUInt32BE(28 + jpeg.length, 8)
+      block.writeUInt32BE(1, 12)
+      block.writeUInt32BE(64, 16)
+      block.writeUInt32BE(64, 20)
+      block.writeUInt32BE(jpeg.length, 32)
+      block.writeUInt16BE(24, 36)
+      block.writeUInt16BE(1, 38)
+      jpeg.copy(block, 40)
+      header.writeUInt32BE(block.length, 30)
+      await fsp.writeFile(filePath, Buffer.concat([header, block]))
+      await fsp.truncate(filePath, 201 * 1024 * 1024)
+
+      const storage = createFolioStorageService({ dataDir: dir })
+      const runtime = createFolioRuntimeService({ storage, admit: () => true, trustedOrigins: [] })
+      const tasks = registerBaseTasksHost({ runtime })
+      const shellCalls: string[] = []
+      const host = registerBaseThumbsHost({
+        runtime, storage, tasks: tasks.service,
+        native: createMockNative({ shellExts: new Set([ext === 'psd' ? '.psd' : '.psb']), shellCalls }),
+      })
+      try {
+        expect(await host.service.generate({ filePath })).toMatchObject({
+          providerId: 'psd-embedded-jpeg',
+          mime: 'image/jpeg',
+          buffer: jpeg,
+        })
+        expect(shellCalls).toEqual([])
+      } finally {
+        host.dispose()
+        tasks.dispose()
+        runtime.dispose()
+      }
+    },
+  )
+
+  it('retries an older miss and asks Windows Shell for a large PSD', async () => {
+    const dir = await makeTempDir()
+    const storage = createFolioStorageService({ dataDir: dir })
+    const runtime = createFolioRuntimeService({ storage, admit: () => true, trustedOrigins: [] })
+    const tasks = registerBaseTasksHost({ runtime })
+    const shellExts = new Set<string>()
+    const native = createMockNative({ shellExts })
+    const host = registerBaseThumbsHost({ runtime, storage, native, tasks: tasks.service })
+    const filePath = path.join(dir, 'large.psd')
+    const clock = vi.spyOn(Date, 'now')
+    try {
+      await fsp.writeFile(filePath, '')
+      await fsp.truncate(filePath, 201 * 1024 * 1024)
+      const enteredAt = Date.now()
+      clock.mockReturnValue(enteredAt - 10 * 60_000)
+      expect(await host.service.generate({ filePath })).toBeNull()
+      clock.mockReturnValue(enteredAt)
+      shellExts.add('.psd')
+      expect(await host.service.generate({ filePath })).toMatchObject({ mime: 'image/jpeg' })
+    } finally {
+      clock.mockRestore()
+      host.dispose()
+      tasks.dispose()
+      runtime.dispose()
+    }
+  })
+
   it('supports L0 blacklist, Try-First L1a/L1b catch-all (.cdr), and dynamic custom format providers', async () => {
     const dataDir = await makeTempDir()
     const sampleDir = await makeTempDir()

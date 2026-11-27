@@ -4,8 +4,9 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import type { FolioNativeService, ThumbGeneratorProvider } from '@folio/base-contract'
+import type { FolioNativeService, ThumbGenerateRequest, ThumbGeneratorProvider } from '@folio/base-contract'
 import { HEAVY_DESIGN_AVOID_BYTES, shouldAvoidHeavyInFastLayer } from './blacklist.js'
+import { readPsdEmbeddedJpeg } from './psd-preview.js'
 import type { ThumbToolRegistry } from './tools.js'
 
 const execFileAsync = promisify(execFile)
@@ -115,8 +116,27 @@ export function createBuiltinThumbProviders(
     'native' in nativeOrOptions ? nativeOrOptions : { native: nativeOrOptions }
   const { native, tools } = opts
   const avoidBytes = opts.heavyAvoidBytes ?? HEAVY_DESIGN_AVOID_BYTES
+  const isHeavyDesign = (req: ThumbGenerateRequest): boolean =>
+    shouldAvoidHeavyInFastLayer(req.ext, req.fileSize, avoidBytes)
+  const generateShellThumb: ThumbGeneratorProvider['generate'] = req =>
+    native.getThumbnail(req.filePath, req.maxDim, {
+      allowIconFallback: false,
+      preferPng: req.preferPng,
+      signal: req.signal,
+    })
 
   const providers: ThumbGeneratorProvider[] = [
+    {
+      id: 'psd-embedded-jpeg',
+      title: 'Photoshop 内嵌 JPEG 预览',
+      priority: 15,
+      queueType: 'fast',
+      extensions: ['.psd', '.psb'],
+      async generate(req) {
+        const buffer = await readPsdEmbeddedJpeg(req.filePath, req.signal)
+        return buffer ? { buffer, mime: 'image/jpeg' } : null
+      },
+    },
     // L1a-1: SVG direct pass-through
     {
       id: 'svg-direct',
@@ -144,7 +164,7 @@ export function createBuiltinThumbProviders(
       queueType: 'fast',
       extensions: [...WIC_IMAGE_EXTS],
       canHandle(req) {
-        return !shouldAvoidHeavyInFastLayer(req.ext, req.fileSize, avoidBytes)
+        return !isHeavyDesign(req)
       },
       async generate(req) {
         const rendered = await native.renderImageProxy(req.filePath, req.maxDim, {
@@ -157,7 +177,7 @@ export function createBuiltinThumbProviders(
       },
     },
 
-    // L1b: Windows Shell catch-all (Try-First, SIIGBF_THUMBNAILONLY, avoids oversized PSD/PSB/TIF)
+    // Reserve the fast queue for files that are unlikely to tie up a Shell worker.
     {
       id: 'win-shell-media',
       title: 'Windows Shell 原生外壳缩略图 (L1b)',
@@ -165,21 +185,18 @@ export function createBuiltinThumbProviders(
       queueType: 'fast',
       extensions: ['*'],
       canHandle(req) {
-        return !shouldAvoidHeavyInFastLayer(req.ext, req.fileSize, avoidBytes)
+        return !isHeavyDesign(req)
       },
-      async generate(req) {
-        const shellThumb = await native
-          .getThumbnail(req.filePath, req.maxDim, {
-            allowIconFallback: false,
-            preferPng: req.preferPng,
-            signal: req.signal,
-          })
-          .catch(() => null)
-        if (shellThumb && shellThumb.buffer.length > 0) {
-          return { buffer: shellThumb.buffer, mime: shellThumb.mime }
-        }
-        return null
-      },
+      generate: generateShellThumb,
+    },
+    {
+      id: 'win-shell-design-heavy',
+      title: 'Windows Shell 大文件缩略图',
+      priority: 31,
+      queueType: 'heavy',
+      extensions: ['*'],
+      canHandle: isHeavyDesign,
+      generate: generateShellThumb,
     },
   ]
 

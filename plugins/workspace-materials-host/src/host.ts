@@ -9,6 +9,8 @@ import {
   type FolioNativeService,
   type FolioRuntimeService,
   type FolioStorageService,
+  type FolioTasksService,
+  type TaskRunHelpers,
 } from '@folio/base-contract'
 import {
   createWindowsMaterialsDialogProvider,
@@ -50,6 +52,7 @@ export interface RegisterWorkspaceMaterialsHostOptions {
   readonly storage: FolioStorageService
   readonly native?: FolioNativeService
   readonly fs?: FolioFsService
+  readonly tasks?: FolioTasksService
   readonly bridge?: VectorCraftBridge
   readonly dialogProvider?: MaterialsDialogProvider
   readonly disableAutoSync?: boolean
@@ -946,13 +949,28 @@ export function registerWorkspaceMaterialsHost(
             })
           }
 
-          const exported = await bridge.exportPages({
-            items: resolvedItems,
-            format: input.format,
-            outputDir: input.outputDir,
-            ppi: input.ppi,
-            mergedPdfFileName: input.mergedPdfFileName,
-          })
+          const runExport = async (helpers?: TaskRunHelpers) => {
+            helpers?.reportProgress({ current: 0, total: resolvedItems.length, message: '正在导出物料页面' })
+            return bridge.exportPages({
+              items: resolvedItems,
+              format: input.format,
+              outputDir: input.outputDir,
+              ppi: input.ppi,
+              mergedPdfFileName: input.mergedPdfFileName,
+              onProgress: (current, message) => {
+                helpers?.reportProgress({ current, total: resolvedItems.length, message })
+              },
+            })
+          }
+          const exported = options.tasks
+            ? await options.tasks.enqueue({
+                scope: 'materials', queue: 'materials-export', concurrency: 1,
+                title: `物料导出：${project.name}`,
+                pausable: false, cancellable: false,
+                meta: { projectId: project.id, projectName: project.name },
+                run: runExport,
+              }).done
+            : await runExport()
 
           await store.updateSettings({ defaultExportDir: normalizeLocalPath(input.outputDir) })
           if (input.revealAfterExport && exported.length > 0) {
@@ -1193,6 +1211,7 @@ export function registerWorkspaceMaterialsHost(
         cacheDir: pluginStorage.cacheDir,
         bridge,
         fs,
+        tasks: options.tasks,
       }),
     ),
   ]
@@ -1207,7 +1226,7 @@ export function registerWorkspaceMaterialsHost(
 }
 
 export const name = 'workspace-materials-host'
-export const inject = ['folioRuntime', 'folioStorage', 'folioNative', 'folioFs'] as const
+export const inject = ['folioRuntime', 'folioStorage', 'folioNative', 'folioFs', 'folioTasks'] as const
 
 export function apply(ctx: Context): void {
   ctx.effect(
@@ -1217,6 +1236,7 @@ export function apply(ctx: Context): void {
         storage: ctx.folioStorage,
         native: ctx.folioNative,
         fs: ctx.folioFs,
+        tasks: ctx.folioTasks,
       }),
     'workspace-materials-host: actions + vectorcraft bridge + preview route',
   )

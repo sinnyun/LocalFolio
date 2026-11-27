@@ -58,6 +58,7 @@ $ExpectedClientPlugins = @(
   '@folio/feature-canvas-eagle-ui',
   '@folio/workspace-materials-ui',
   '@folio/workspace-projects-ui',
+  '@folio/workspace-monitor-ui',
   '@folio/feature-archive-ui',
   '@folio/feature-thumbs-eagle-ui'
 )

@@ -12,6 +12,8 @@ import {
   type FolioRuntimeService,
   type FolioStorageService,
   type FolioTasksService,
+  type TaskRunHelpers,
+  type TaskStatus,
   type FolioThumbsService,
   type ProjectArchiveMetaInfo,
   type ProjectFileResolveContext,
@@ -175,6 +177,39 @@ function toHostRecord(summary: ProjectSummary): ProjectHostRecord {
     archiveBytes: summary.archiveBytes,
     archiveFileName: summary.archiveFileName,
   }
+}
+
+function createProjectTaskProgress(
+  helpers: TaskRunHelpers,
+  targets: readonly { id: string; name: string }[],
+) {
+  const projects = targets.map(target => ({
+    projectId: target.id,
+    projectName: target.name,
+    status: 'queued' as TaskStatus,
+    error: undefined as string | undefined,
+  }))
+  let succeeded = 0
+  let failed = 0
+  const report = (message: string): void => {
+    helpers.reportProgress({
+      current: succeeded + failed,
+      total: projects.length,
+      message,
+      detail: { succeeded, failed, projects: [...projects] },
+    })
+  }
+  const setStatus = (index: number, status: TaskStatus, error?: unknown): void => {
+    const project = projects[index]!
+    projects[index] = {
+      ...project,
+      status,
+      error: error === undefined ? undefined : error instanceof Error ? error.message : String(error),
+    }
+    if (status === 'completed') succeeded += 1
+    if (status === 'failed') failed += 1
+  }
+  return { report, setStatus }
 }
 
 export interface RegisterWorkspaceProjectsHostOptions {
@@ -446,7 +481,9 @@ export function createWorkspaceProjectsHost(
         helpers.throwIfAborted()
         helpers.reportProgress({ current: 0, total: null, message: '正在发现项目文件夹…' })
         const discovered = await discoverLibraryProjects(library.rootPath)
-        const total = discovered.length
+        const targets = discovered.map(item => ({ id: computeProjectId(item.path), name: item.name }))
+        const total = targets.length
+        const progress = createProjectTaskProgress(helpers, targets)
         const results: ProjectSummary[] = []
         let lastInvalidateAt = 0
 
@@ -454,63 +491,66 @@ export function createWorkspaceProjectsHost(
           helpers.throwIfAborted()
           await helpers.waitIfPaused()
           const item = discovered[i]!
-          const projectId = computeProjectId(item.path)
+          const projectId = targets[i]!.id
 
-          helpers.reportProgress({
-            current: i,
-            total,
-            message: `扫描 (${i + 1}/${total})：${item.name}`,
-            detail: { projectName: item.name },
-          })
+          progress.setStatus(i, 'running')
+          progress.report(`扫描 (${i + 1}/${total})：${item.name}`)
 
-          const existingManifest = await metaStore.readManifest(item.path, projectId)
-          if (existingManifest) {
-            const check = await runCheckInWorker(item.path, existingManifest, helpers.signal)
-            const coverThumbFile = await ensureCoverThumbnail(
-              item.path,
-              existingManifest,
-              helpers.signal,
-            )
-            const manifestWithThumb =
-              coverThumbFile && coverThumbFile !== existingManifest.coverThumbFile
-                ? { ...existingManifest, coverThumbFile }
-                : existingManifest
-            const summary = buildProjectSummary({
-              libraryId: library.id,
-              projectPath: item.path,
-              manifest: manifestWithThumb,
-              hasChanges: check.hasChanges,
-              changeSummary: check.changeSummary,
-              missing: check.missing,
-              metaWritable: true,
-            })
-            results.push(summary)
-          } else {
-            const scanRes = await runScanInWorker(item.path, null, helpers.signal)
-            const coverThumbFile = await ensureCoverThumbnail(
-              item.path,
-              scanRes.manifest,
-              helpers.signal,
-            )
-            const finalManifest: ProjectManifest = {
-              ...scanRes.manifest,
-              projectId,
-              name: item.name,
-              coverThumbFile,
-            }
-            const writeRes = await metaStore.writeManifest(item.path, finalManifest)
-            results.push(
-              buildProjectSummary({
+          try {
+            const existingManifest = await metaStore.readManifest(item.path, projectId)
+            if (existingManifest) {
+              const check = await runCheckInWorker(item.path, existingManifest, helpers.signal)
+              const coverThumbFile = await ensureCoverThumbnail(
+                item.path,
+                existingManifest,
+                helpers.signal,
+              )
+              const manifestWithThumb =
+                coverThumbFile && coverThumbFile !== existingManifest.coverThumbFile
+                  ? { ...existingManifest, coverThumbFile }
+                  : existingManifest
+              const summary = buildProjectSummary({
                 libraryId: library.id,
                 projectPath: item.path,
-                manifest: finalManifest,
-                hasChanges: false,
-                changeSummary: EMPTY_CHANGE_SUMMARY,
-                missing: false,
-                metaWritable: writeRes.metaWritable,
-              }),
-            )
+                manifest: manifestWithThumb,
+                hasChanges: check.hasChanges,
+                changeSummary: check.changeSummary,
+                missing: check.missing,
+                metaWritable: true,
+              })
+              results.push(summary)
+            } else {
+              const scanRes = await runScanInWorker(item.path, null, helpers.signal)
+              const coverThumbFile = await ensureCoverThumbnail(
+                item.path,
+                scanRes.manifest,
+                helpers.signal,
+              )
+              const finalManifest: ProjectManifest = {
+                ...scanRes.manifest,
+                projectId,
+                name: item.name,
+                coverThumbFile,
+              }
+              const writeRes = await metaStore.writeManifest(item.path, finalManifest)
+              results.push(
+                buildProjectSummary({
+                  libraryId: library.id,
+                  projectPath: item.path,
+                  manifest: finalManifest,
+                  hasChanges: false,
+                  changeSummary: EMPTY_CHANGE_SUMMARY,
+                  missing: false,
+                  metaWritable: writeRes.metaWritable,
+                }),
+              )
+            }
+          } catch (err) {
+            progress.setStatus(i, helpers.signal.aborted ? 'cancelled' : 'failed', err)
+            progress.report(`扫描中止：${item.name}`)
+            throw err
           }
+          progress.setStatus(i, 'completed')
 
           const now = Date.now()
           if (now - lastInvalidateAt > 800) {
@@ -523,11 +563,7 @@ export function createWorkspaceProjectsHost(
         const completedAt = Date.now()
         await upsertProjectsInIndex(library.id, completedAt, results, true)
         runtime.events.emitInvalidate('projects', library.id)
-        helpers.reportProgress({
-          current: total,
-          total,
-          message: `已完成 ${total} 个项目的扫描`,
-        })
+        progress.report(`已完成 ${total} 个项目的扫描`)
         return { projectCount: results.length }
       },
     })
@@ -1028,7 +1064,7 @@ export function createWorkspaceProjectsHost(
             pausable: false,
             cancellable: true,
             title: `AI 提取项目信息：${summary.name}`,
-            meta: { projectId: summary.id, mode: 'ai-single' },
+            meta: { projectId: summary.id, projectName: summary.name, mode: 'ai-single' },
             run: async helpers => {
               helpers.reportProgress({
                 current: 0,
@@ -1097,15 +1133,13 @@ export function createWorkspaceProjectsHost(
             run: async helpers => {
               let succeeded = 0
               let failed = 0
+              const progress = createProjectTaskProgress(helpers, targets)
               for (let i = 0; i < targets.length; i += 1) {
                 helpers.throwIfAborted()
                 await helpers.waitIfPaused()
                 const target = targets[i]!
-                helpers.reportProgress({
-                  current: i,
-                  total: targets.length,
-                  message: `AI 提取 (${i + 1}/${targets.length})：${target.name}`,
-                })
+                progress.setStatus(i, 'running')
+                progress.report(`AI 提取 (${i + 1}/${targets.length})：${target.name}`)
                 try {
                   await extractSingleProjectWithAi(target, {
                     applyCover: input.applyCover,
@@ -1114,16 +1148,18 @@ export function createWorkspaceProjectsHost(
                     signal: helpers.signal,
                   })
                   succeeded += 1
+                  progress.setStatus(i, 'completed')
                 } catch (err) {
-                  if (helpers.signal.aborted) throw err
+                  if (helpers.signal.aborted) {
+                    progress.setStatus(i, 'cancelled')
+                    progress.report(`已取消 AI 提取：${target.name}`)
+                    throw err
+                  }
                   failed += 1
+                  progress.setStatus(i, 'failed', err)
                 }
               }
-              helpers.reportProgress({
-                current: targets.length,
-                total: targets.length,
-                message: `AI 批量提取完成（成功 ${succeeded}${failed > 0 ? `，失败 ${failed}` : ''}）`,
-              })
+              progress.report(`AI 批量提取完成（成功 ${succeeded}${failed > 0 ? `，失败 ${failed}` : ''}）`)
               return { succeeded, failed }
             },
           })
@@ -1231,23 +1267,24 @@ export function createWorkspaceProjectsHost(
             meta: { total: targets.length, mode: 'batch-sync' },
             run: async helpers => {
               let synced = 0
+              const progress = createProjectTaskProgress(helpers, targets)
               for (let i = 0; i < targets.length; i += 1) {
                 helpers.throwIfAborted()
                 await helpers.waitIfPaused()
                 const target = targets[i]!
-                helpers.reportProgress({
-                  current: i,
-                  total: targets.length,
-                  message: `增量更新 (${i + 1}/${targets.length})：${target.name}`,
-                })
-                await syncSingleProject(target, helpers.signal)
+                progress.setStatus(i, 'running')
+                progress.report(`增量更新 (${i + 1}/${targets.length})：${target.name}`)
+                try {
+                  await syncSingleProject(target, helpers.signal)
+                } catch (err) {
+                  progress.setStatus(i, helpers.signal.aborted ? 'cancelled' : 'failed', err)
+                  progress.report(`增量更新中止：${target.name}`)
+                  throw err
+                }
+                progress.setStatus(i, 'completed')
                 synced += 1
               }
-              helpers.reportProgress({
-                current: targets.length,
-                total: targets.length,
-                message: `已完成 ${synced} 个项目的增量更新`,
-              })
+              progress.report(`已完成 ${synced} 个项目的增量更新`)
               return { synced }
             },
           })
@@ -1304,12 +1341,20 @@ export function createWorkspaceProjectsHost(
       return summary ? toHostRecord(summary) : null
     },
 
+    async syncProject(projectId, signal): Promise<void> {
+      const summary = await resolveProjectById(projectId)
+      if (!summary) {
+        throw new FolioError('project_not_found', `项目不存在: ${projectId}`, 404)
+      }
+      await syncSingleProject(summary, signal)
+    },
+
     async listProjects(): Promise<readonly ProjectHostRecord[]> {
       const idx = await indexStore.read()
       return idx.projects.map(toHostRecord)
     },
 
-    async readProjectSnapshot(projectId: string): Promise<ProjectHostManifestSnapshot | null> {
+    async readProjectSnapshot(projectId, snapshotOpts = {}): Promise<ProjectHostManifestSnapshot | null> {
       const summary = await resolveProjectById(projectId)
       if (!summary) return null
       let manifest = await metaStore.readManifest(summary.path, summary.id)
@@ -1318,6 +1363,16 @@ export function createWorkspaceProjectsHost(
         manifest = { ...scanRes.manifest, projectId: summary.id, name: summary.name }
         await metaStore.writeManifest(summary.path, manifest)
       }
+      const files: ProjectHostManifestSnapshot['files'] = manifest.groups.flatMap(g =>
+        g.files.map(f => ({
+          relPath: f.relPath,
+          name: f.name,
+          size: f.size,
+          fingerprint: f.fingerprint,
+          thumbKey: f.thumbKey,
+          thumbSupported: f.thumbSupported,
+        })),
+      )
       return {
         projectId: manifest.projectId,
         name: manifest.name,
@@ -1327,16 +1382,14 @@ export function createWorkspaceProjectsHost(
           folderCount: manifest.stats.folderCount,
           totalBytes: manifest.stats.totalBytes,
         },
-        files: manifest.groups.flatMap(g =>
-          g.files.map(f => ({
-            relPath: f.relPath,
-            name: f.name,
-            size: f.size,
-            fingerprint: f.fingerprint,
-            thumbKey: f.thumbKey,
-            thumbSupported: f.thumbSupported,
-          })),
-        ),
+        files: snapshotOpts.includeCachedThumbs
+          ? await Promise.all(files.map(async file => ({
+              ...file,
+              hasCachedThumb: Boolean(
+                await thumbService.readCachedThumb(summary.path, summary.id, file.relPath, file.thumbKey),
+              ),
+            })))
+          : files,
       }
     },
 
@@ -1389,6 +1442,16 @@ export function createWorkspaceProjectsHost(
         hideMetaDir: warmOpts.hideMetaDir,
         onProgress: warmOpts.onProgress,
       })
+    },
+
+    async cacheProjectFileThumb(projectId, file, acquireSource, opts = {}) {
+      const summary = await resolveProjectById(projectId)
+      if (!summary) {
+        throw new FolioError('project_not_found', `项目不存在: ${projectId}`, 404)
+      }
+      return Boolean(await thumbService.ensureThumb(
+        summary.path, projectId, file.relPath, file.thumbKey, { ...opts, acquireSource },
+      ))
     },
 
     async inspectArchivedLiveFiles(projectId: string) {

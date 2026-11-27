@@ -2,7 +2,7 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { FolioNativeService, NativeImageProxyResult } from '@folio/base-contract'
+import type { FolioNativeService, NativeImageProxyResult, TaskSnapshot } from '@folio/base-contract'
 import { createFolioFsService } from '../../../base-fs-host/src/host.js'
 import { createFolioRuntimeService } from '../../../base-runtime-host/src/host.js'
 import { createFolioStorageService } from '../../../base-storage-host/src/host.js'
@@ -149,6 +149,73 @@ function createFakeZpaqRunner(failVerify = false): ArchiveCliRunner {
 }
 
 describe('@folio/feature-archive-host', () => {
+  it('queues unique unarchived projects in the requested order and continues after verification fails', async () => {
+    const dataDir = await makeTempDir()
+    const libRoot = await makeTempDir()
+    const fakeExe = path.join(dataDir, 'zpaqfranz.exe')
+    await fsp.writeFile(fakeExe, Buffer.concat([Buffer.from([0x4d, 0x5a]), Buffer.alloc(50 * 1024)]))
+    for (const name of ['Archived', 'Fails', 'Succeeds']) {
+      await fsp.mkdir(path.join(libRoot, name))
+      await fsp.writeFile(path.join(libRoot, name, 'notes.txt'), name)
+    }
+    const native = createMockNative({ opened: [], revealed: [], recycled: [] })
+    const storage = createFolioStorageService({ dataDir })
+    const runtime = createFolioRuntimeService({ storage, admit: () => true, trustedOrigins: [] })
+    const tasks = registerBaseTasksHost({ runtime })
+    const thumbs = createFolioThumbsService({ native, tasks: tasks.service })
+    const projects = createWorkspaceProjectsHost({
+      runtime, storage, tasks: tasks.service, native, thumbs, workerPath: null,
+    })
+    const events: string[] = []
+    const runner = createFakeZpaqRunner()
+    const archive = registerFeatureArchiveHost({
+      runtime, storage, tasks: tasks.service, native, projectsHost: projects.service,
+      runner: {
+        ...runner,
+        async add(opts) {
+          events.push(`add:${path.basename(opts.projectPath)}`)
+          await runner.add(opts)
+        },
+        async test(opts) {
+          const name = path.basename(opts.projectPath)
+          events.push(`verify:${name}`)
+          if (name === 'Fails') throw new Error('verification failed')
+        },
+      },
+    })
+    try {
+      await runtime.executeAction('projects.libraries.add', { rootPath: libRoot })
+      await waitForTasksDone(runtime, 'projects')
+      await runtime.executeAction('archive.tool.pickLocal', { filePath: fakeExe })
+      const ids = new Map((await projects.service.listProjects()).map(project => [project.name, project.id]))
+      const archived = ids.get('Archived')!
+      const fails = ids.get('Fails')!
+      const succeeds = ids.get('Succeeds')!
+      await runtime.executeAction('archive.project.pack', { projectId: archived, sourceDisposal: 'keep' })
+      await waitForTasksDone(runtime, 'projects')
+      events.length = 0
+      await fsp.writeFile(path.join(libRoot, 'Succeeds', 'new.txt'), 'added since scan')
+
+      const result = await runtime.executeAction<{ tasks: TaskSnapshot[]; skippedCount: number }>(
+        'archive.projects.packBatch',
+        { projectIds: [fails, archived, succeeds, fails], sourceDisposal: 'keep' },
+      )
+      expect(result.tasks.map(task => task.meta?.projectId)).toEqual([fails, succeeds])
+      expect(result.skippedCount).toBe(1)
+      await waitForTasksDone(runtime, 'projects')
+      expect(events).toEqual(['add:Fails', 'verify:Fails', 'add:Succeeds', 'verify:Succeeds'])
+      expect(result.tasks.map(task => tasks.service.getTask(task.id)?.status)).toEqual(['failed', 'completed'])
+      expect((await projects.service.readProjectSnapshot(succeeds))?.files.map(file => file.name)).toContain('new.txt')
+      await expect(fsp.readFile(path.join(libRoot, 'Fails', 'notes.txt'), 'utf8')).resolves.toBe('Fails')
+    } finally {
+      archive.dispose()
+      projects.dispose()
+      thumbs.dispose()
+      tasks.dispose()
+      runtime.dispose()
+    }
+  })
+
   it('packs with thumb pre-warm, recycles sources cleanly, extracts seamlessly for open/media/export, and restores project', async () => {
     const dataDir = await makeTempDir()
     const libRoot = await makeTempDir()
@@ -245,6 +312,28 @@ describe('@folio/feature-archive-host', () => {
     )
     expect(mediaRes.status).toBe(200)
     expect(await mediaRes.text()).toBe('FAKE-HERO-IMAGE-CONTENT')
+
+    // Rebuild just one missing thumbnail directly from the archive.
+    const thumbDir = path.join(projDir, '.folio-meta', 'thumbs', 'renders')
+    const oldThumb = (await fsp.readdir(thumbDir)).find(name => name.startsWith('alt.jpg__'))
+    expect(oldThumb).toBeTruthy()
+    await fsp.unlink(path.join(thumbDir, oldThumb!))
+    const entry = (await projectsHost.service.readProjectSnapshot(project.id))?.files
+      .find(file => file.relPath === 'renders/alt.jpg')
+    const thumbUrl = `http://127.0.0.1/lf/projects/thumb?projectId=${project.id}&relPath=renders%2Falt.jpg&tk=${entry!.thumbKey}`
+    expect((await runtime.rpc.fetch(new Request(thumbUrl))).status).toBe(204)
+    const rebuilder = await runtime.executeAction<{ task: TaskSnapshot }>('archive.project.rebuildThumbs', {
+      projectId: project.id, relPaths: [entry!.relPath, entry!.relPath],
+    })
+    await waitForTasksDone(runtime, 'projects')
+    expect(tasksHost.service.getTask(rebuilder.task.id)).toMatchObject({
+      status: 'completed',
+      progress: { current: 1, total: 1, detail: { succeeded: 1, failed: 0 } },
+    })
+    expect((await runtime.rpc.fetch(new Request(thumbUrl))).status).toBe(200)
+    await expect(fsp.stat(path.join(projDir, entry!.relPath))).rejects.toThrow()
+    await expect(fsp.readdir(path.join(dataDir, 'plugins', 'feature-archive-host', 'cache', 'thumb-sources')))
+      .resolves.toEqual([])
 
     // 6. Swap cover while archived uses cached 360px thumb with zero decompression
     const metaSwapRes = await runtime.executeAction<ProjectDetailResult>('projects.meta.update', {

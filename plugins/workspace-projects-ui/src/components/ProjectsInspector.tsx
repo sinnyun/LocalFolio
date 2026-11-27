@@ -34,6 +34,7 @@ export function ProjectsInspector(_props: FrameViewProps): React.ReactElement {
     aiApplyCover,
     extractingProjectId,
     selectedProject,
+    thumbnailRevision,
     projectManifest,
     selectedFile,
     syncingProjectId,
@@ -340,6 +341,7 @@ export function ProjectsInspector(_props: FrameViewProps): React.ReactElement {
                         selectedProject.id,
                         selectedFile.relPath,
                         selectedFile.thumbKey,
+                        thumbnailRevision,
                       )
                     : null
                 }

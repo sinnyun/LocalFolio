@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { FolioError } from '@folio/base-contract'
+import { FolioError, type FolioTasksService, type TaskProgress } from '@folio/base-contract'
 import { classifyImageFile, inspectLinkedImage } from './image-meta.js'
 import type { LinkedImageInspectResult } from './types.js'
 
@@ -116,6 +116,46 @@ export interface DropImportManagerOptions {
   readonly maxBytes?: number
   readonly chunkBytes?: number
   readonly sessionTtlMs?: number
+  readonly tasks?: FolioTasksService
+}
+
+interface ImportTransfer {
+  report(receivedBytes: number): void
+  finish(error?: unknown): void
+}
+
+function trackImportTransfer(
+  tasks: FolioTasksService,
+  fileName: string,
+  total: number | null,
+): ImportTransfer {
+  let settle: (error?: unknown) => void = () => {}
+  const completion = new Promise<void>((resolve, reject) => {
+    settle = error => error === undefined ? resolve() : reject(error)
+  })
+  void completion.catch(() => {})
+  let progress: TaskProgress = { current: 0, total, message: '正在接收图片' }
+  let report: ((value: TaskProgress) => void) | undefined
+  tasks.enqueue({
+    scope: 'canvas',
+    queue: 'canvas-import',
+    concurrency: 32,
+    title: `导入图片：${fileName}`,
+    pausable: false,
+    cancellable: false,
+    run: async helpers => {
+      report = helpers.reportProgress
+      report(progress)
+      await completion
+    },
+  })
+  return {
+    report(receivedBytes) {
+      progress = { ...progress, current: receivedBytes }
+      report?.(progress)
+    },
+    finish: settle,
+  }
 }
 
 interface ImportSession {
@@ -124,6 +164,7 @@ interface ImportSession {
   readonly fileName: string
   readonly maxBytes: number
   readonly handle: fsp.FileHandle
+  readonly transfer?: ImportTransfer
   receivedBytes: number
   lastUsedAt: number
   queue: Promise<void>
@@ -201,6 +242,9 @@ export function createDropImportManager(options: DropImportManagerOptions): Drop
     if (!session) return
     await closeSession(session)
     await fsp.unlink(session.stagingPath).catch(() => {})
+    const error = new Error('图片导入已取消')
+    error.name = 'AbortError'
+    session.transfer?.finish(error)
   }
 
   const purgeExpiredSessions = (): void => {
@@ -211,6 +255,8 @@ export function createDropImportManager(options: DropImportManagerOptions): Drop
       }
     }
   }
+  const purgeTimer = setInterval(purgeExpiredSessions, Math.max(1000, Math.min(60_000, sessionTtlMs)))
+  purgeTimer.unref?.()
 
   return {
     importsDir,
@@ -254,6 +300,7 @@ export function createDropImportManager(options: DropImportManagerOptions): Drop
         fileName,
         maxBytes,
         handle,
+        transfer: options.tasks ? trackImportTransfer(options.tasks, fileName, input.size ?? null) : undefined,
         receivedBytes: 0,
         lastUsedAt: Date.now(),
         queue: Promise.resolve(),
@@ -294,7 +341,11 @@ export function createDropImportManager(options: DropImportManagerOptions): Drop
         }
         await session.handle.write(bytes, 0, bytes.length, session.receivedBytes)
         session.receivedBytes += bytes.length
+        session.transfer?.report(session.receivedBytes)
         return { receivedBytes: session.receivedBytes }
+      }).catch(err => {
+        session.transfer?.finish(err)
+        throw err
       })
     },
 
@@ -316,8 +367,10 @@ export function createDropImportManager(options: DropImportManagerOptions): Drop
           await fsp.unlink(destination).catch(() => {})
           throw new FolioError('unsupported_file_type', '导入文件不是受支持的图片格式', 400)
         }
+        session.transfer?.finish()
         return inspected
       } catch (err) {
+        session.transfer?.finish(err)
         await fsp.unlink(session.stagingPath).catch(() => {})
         throw err
       }
@@ -326,12 +379,10 @@ export function createDropImportManager(options: DropImportManagerOptions): Drop
     abort,
 
     dispose(): void {
+      clearInterval(purgeTimer)
       for (const session of Array.from(sessions.values())) {
-        session.closed = true
-        void session.handle.close().catch(() => {})
-        void fsp.unlink(session.stagingPath).catch(() => {})
+        void abort(session.importId).catch(() => {})
       }
-      sessions.clear()
     },
   }
 }

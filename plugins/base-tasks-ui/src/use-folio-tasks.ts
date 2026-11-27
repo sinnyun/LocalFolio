@@ -18,7 +18,8 @@ function upsertTask(list: readonly TaskSnapshot[], snap: TaskSnapshot): TaskSnap
   for (const item of list) {
     map.set(item.id, item)
   }
-  map.set(snap.id, snap)
+  const previous = map.get(snap.id)
+  if (!previous || previous.updatedAt <= snap.updatedAt) map.set(snap.id, snap)
   return sortTasksDesc(Array.from(map.values()))
 }
 
@@ -45,7 +46,7 @@ function mergeFetchedTasks(
 }
 
 export interface UseFolioTasksOptions {
-  readonly scopes: readonly string[]
+  readonly scopes: readonly string[] | 'all'
   readonly enabled?: boolean
   readonly onTaskUpdated?: (task: TaskSnapshot) => void
   readonly onTaskCompleted?: (task: TaskSnapshot) => void
@@ -53,6 +54,8 @@ export interface UseFolioTasksOptions {
 
 export interface UseFolioTasksResult {
   readonly tasks: readonly TaskSnapshot[]
+  readonly loading: boolean
+  readonly error: string | null
   readonly activeTask: TaskSnapshot | null
   readonly recentFinishedTask: TaskSnapshot | null
   trackTask(snapshot: TaskSnapshot): void
@@ -65,13 +68,16 @@ export interface UseFolioTasksResult {
 export function useFolioTasks(options: UseFolioTasksOptions): UseFolioTasksResult {
   const { scopes, enabled = true, onTaskUpdated, onTaskCompleted } = options
   const [tasks, setTasks] = React.useState<TaskSnapshot[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState<string | null>(null)
+  const allScopes = scopes === 'all'
 
   const onTaskUpdatedRef = React.useRef(onTaskUpdated)
   onTaskUpdatedRef.current = onTaskUpdated
   const onTaskCompletedRef = React.useRef(onTaskCompleted)
   onTaskCompletedRef.current = onTaskCompleted
 
-  const scopesKey = scopes.map(s => s.trim()).filter(Boolean).join('\0')
+  const scopesKey = allScopes ? '' : scopes.map(s => s.trim()).filter(Boolean).join('\0')
   const normalizedScopes = React.useMemo(
     () => (scopesKey ? Array.from(new Set(scopesKey.split('\0'))) : []),
     [scopesKey],
@@ -82,8 +88,41 @@ export function useFolioTasks(options: UseFolioTasksOptions): UseFolioTasksResul
   // Initial load for all declared scopes
   React.useEffect(() => {
     if (!enabled) return undefined
+    if (allScopes) {
+      let active = true
+      let fetching = false
+      const reload = async (): Promise<void> => {
+        if (fetching) return
+        fetching = true
+        const startedAt = Date.now()
+        try {
+          const response = await rpcCall<{ tasks: TaskSnapshot[] }>('tasks.list', {})
+          if (!active) return
+          const fetched = response.tasks
+          const scopesInResponse = new Set(fetched.map(task => task.scope))
+          setTasks(prev => mergeFetchedTasks(
+            prev.filter(task => task.updatedAt >= startedAt),
+            fetched,
+            new Set([...scopesInResponse, ...prev.map(task => task.scope)]),
+          ))
+          setError(null)
+        } catch (err) {
+          if (active) setError(err instanceof Error ? err.message : '无法获取后台任务')
+        } finally {
+          fetching = false
+          if (active) setLoading(false)
+        }
+      }
+      void reload()
+      const timer = setInterval(() => void reload(), 10_000)
+      return () => {
+        active = false
+        clearInterval(timer)
+      }
+    }
     if (normalizedScopes.length === 0) {
       setTasks([])
+      setLoading(false)
       return undefined
     }
 
@@ -100,16 +139,17 @@ export function useFolioTasks(options: UseFolioTasksOptions): UseFolioTasksResul
       if (!active) return
       const fetched = results.flatMap(r => (Array.isArray(r.tasks) ? r.tasks : []))
       setTasks(prev => mergeFetchedTasks(prev, fetched, scopeSet))
+      setLoading(false)
     })
 
     return () => {
       active = false
     }
-  }, [enabled, normalizedScopes])
+  }, [allScopes, enabled, normalizedScopes])
 
   // Subscribe to tasks:<scope> and tasks:cleared via window 'folio:topic'
   React.useEffect(() => {
-    if (!enabled || typeof window === 'undefined' || normalizedScopes.length === 0) {
+    if (!enabled || typeof window === 'undefined' || (!allScopes && normalizedScopes.length === 0)) {
       return undefined
     }
     const scopeSet = new Set(normalizedScopes)
@@ -126,7 +166,7 @@ export function useFolioTasks(options: UseFolioTasksOptions): UseFolioTasksResul
           setTasks(prev => prev.filter(t => !TERMINAL_STATUSES.has(t.status)))
           return
         }
-        if (scopeSet.has(clearedScope)) {
+        if (allScopes || scopeSet.has(clearedScope)) {
           setTasks(prev =>
             prev.filter(t => !(t.scope === clearedScope && TERMINAL_STATUSES.has(t.status))),
           )
@@ -134,9 +174,9 @@ export function useFolioTasks(options: UseFolioTasksOptions): UseFolioTasksResul
         return
       }
 
-      if (detail.topic.startsWith('tasks:')) {
+      if (allScopes ? detail.topic === 'tasks' : detail.topic.startsWith('tasks:')) {
         const topicScope = detail.topic.slice('tasks:'.length)
-        if (!scopeSet.has(topicScope)) return
+        if (!allScopes && !scopeSet.has(topicScope)) return
         const snap = detail.payload as TaskSnapshot | undefined
         if (!snap || typeof snap.id !== 'string') return
         setTasks(prev => upsertTask(prev, snap))
@@ -151,7 +191,7 @@ export function useFolioTasks(options: UseFolioTasksOptions): UseFolioTasksResul
     return () => {
       window.removeEventListener(TOPIC_EVENT_NAME, onTopic)
     }
-  }, [enabled, normalizedScopes])
+  }, [allScopes, enabled, normalizedScopes])
 
   const activeTask = React.useMemo(
     () =>
@@ -186,6 +226,11 @@ export function useFolioTasks(options: UseFolioTasksOptions): UseFolioTasksResul
   }, [])
 
   const clearFinishedTasks = React.useCallback(async (scope?: string) => {
+    if (!scope && allScopes) {
+      await rpcCall('tasks.clear', {})
+      setTasks(prev => prev.filter(task => !TERMINAL_STATUSES.has(task.status)))
+      return
+    }
     const targetScopes = scope ? [scope] : normalizedScopesRef.current
     if (targetScopes.length === 0) return
     await Promise.all(targetScopes.map(s => rpcCall('tasks.clear', { scope: s })))
@@ -193,10 +238,12 @@ export function useFolioTasks(options: UseFolioTasksOptions): UseFolioTasksResul
     setTasks(prev =>
       prev.filter(t => !(TERMINAL_STATUSES.has(t.status) && clearedSet.has(t.scope))),
     )
-  }, [])
+  }, [allScopes])
 
   return {
     tasks,
+    loading,
+    error,
     activeTask,
     recentFinishedTask,
     trackTask,

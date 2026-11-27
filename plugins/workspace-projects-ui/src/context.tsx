@@ -44,6 +44,7 @@ export interface ProjectsContextValue {
   readonly availableTags: readonly string[]
   readonly selectedProjectId: string | null
   readonly selectedProject: ProjectSummary | null
+  readonly thumbnailRevision: string | undefined
   readonly detailLoading: boolean
   readonly projectManifest: ProjectManifest | null
   readonly selectedFile: ProjectFileEntry | null
@@ -306,6 +307,13 @@ export function ProjectsProvider({
       }
     },
   })
+  const rebuiltThumbs = tasks.find(task =>
+    task.meta?.mode === 'archive-thumbs' &&
+    task.meta.projectId === selectedProjectId &&
+    task.finishedAt !== null &&
+    Number(task.progress.detail?.succeeded ?? 0) > 0,
+  )
+  const thumbnailRevision = rebuiltThumbs?.id
 
   const addLibraryByPath = React.useCallback(
     async (rootPath: string, name?: string): Promise<boolean> => {
@@ -912,6 +920,7 @@ export function ProjectsProvider({
     availableTags,
     selectedProjectId,
     selectedProject,
+    thumbnailRevision,
     detailLoading,
     projectManifest,
     selectedFile,

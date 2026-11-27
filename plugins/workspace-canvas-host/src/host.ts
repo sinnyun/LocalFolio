@@ -2,10 +2,12 @@ import type { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
 import {
   defineAction,
+  observeTask,
   type FolioFsService,
   type FolioNativeService,
   type FolioRuntimeService,
   type FolioStorageService,
+  type FolioTasksService,
 } from '@folio/base-contract'
 import { createBoardsManager } from './boards.js'
 import { createDropImportManager } from './drop-import.js'
@@ -34,6 +36,7 @@ export interface RegisterWorkspaceCanvasHostOptions {
   readonly storage: FolioStorageService
   readonly native?: FolioNativeService
   readonly fs?: FolioFsService
+  readonly tasks?: FolioTasksService
   readonly proxyProvider?: ImageProxyProvider
   readonly dialogProvider?: CanvasDialogProvider
   readonly tldrawAssetsRoot?: string
@@ -51,6 +54,7 @@ export function registerWorkspaceCanvasHost(
   const boards = createBoardsManager(pluginStorage)
   const dropImports = createDropImportManager({
     importsDir: pluginStorage.dataPath('imports'),
+    tasks: options.tasks,
   })
 
   const disposers = [
@@ -259,7 +263,9 @@ export function registerWorkspaceCanvasHost(
             }),
           ),
         }),
-        run: async input => relocateMissingImagesInFolder(input.folderPath, input.missingItems),
+        run: async input => observeTask(options.tasks, {
+          scope: 'canvas', key: 'relink', title: '画板批量查找图片链接', item: input.folderPath,
+        }, () => relocateMissingImagesInFolder(input.folderPath, input.missingItems)),
       }),
     ),
 
@@ -356,6 +362,7 @@ export function registerWorkspaceCanvasHost(
         cacheDir: pluginStorage.cacheDir,
         provider: proxyProvider,
         fs,
+        tasks: options.tasks,
       }),
     ),
 
@@ -376,7 +383,7 @@ export function registerWorkspaceCanvasHost(
 }
 
 export const name = 'workspace-canvas-host'
-export const inject = ['folioRuntime', 'folioStorage', 'folioNative', 'folioFs'] as const
+export const inject = ['folioRuntime', 'folioStorage', 'folioNative', 'folioFs', 'folioTasks'] as const
 
 export function apply(ctx: Context): void {
   ctx.effect(
@@ -386,6 +393,7 @@ export function apply(ctx: Context): void {
         storage: ctx.folioStorage,
         native: ctx.folioNative,
         fs: ctx.folioFs,
+        tasks: ctx.folioTasks,
       }),
     'workspace-canvas-host: actions + lod proxy + tldraw assets',
   )

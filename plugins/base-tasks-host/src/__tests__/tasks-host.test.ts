@@ -2,6 +2,7 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { createFolioTasksService } from '../task-manager.js'
 import { createFolioRuntimeService } from '../../../base-runtime-host/src/host.js'
 import { createFolioStorageService } from '../../../base-storage-host/src/host.js'
 import { registerBaseTasksHost } from '../host.js'
@@ -22,6 +23,30 @@ afterEach(async () => {
 })
 
 describe('@folio/base-tasks-host', () => {
+  it('combines overlapping preview work and exposes partial failures without changing operation results', async () => {
+    const tasks = createFolioTasksService({
+      runtime: { events: { emitEvent() {} } } as unknown as Parameters<typeof createFolioTasksService>[0]['runtime'],
+    })
+    try {
+      let finish: (value: string) => void = () => {}
+      const options = { scope: 'files', key: 'thumbs', title: '文件缩略图' }
+      const first = tasks.observe(options, () => new Promise<string>(resolve => { finish = resolve }))
+      const second = tasks.observe({ ...options, isSuccessful: Boolean }, async () => null)
+      expect(tasks.listTasks()).toHaveLength(1)
+      expect(tasks.listTasks()[0]).toMatchObject({ status: 'running', progress: { current: 0, total: 2 } })
+      await expect(second).resolves.toBeNull()
+      finish('jpeg')
+      await expect(first).resolves.toBe('jpeg')
+      await new Promise(resolve => setTimeout(resolve, 340))
+      expect(tasks.listTasks()[0]).toMatchObject({
+        status: 'completed',
+        progress: { current: 2, total: 2, detail: { succeeded: 1, failed: 1, cancelled: 0 } },
+      })
+    } finally {
+      tasks.dispose()
+    }
+  })
+
   it('enforces bounded concurrency and supports signal abort while queued', async () => {
     const queue = createBoundedQueue({ name: 'test', concurrency: 2 })
     let running = 0

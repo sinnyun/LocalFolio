@@ -7,9 +7,12 @@ import {
   getProjectArchiveStem,
   isProjectArchiveArtifactName,
   isProjectArchiveVolumeFileName,
+  observeTask,
   type FolioNativeService,
+  type FolioTasksService,
   type ProjectArchiveCompressionMethod,
   type ProjectArchiveLayout,
+  type TemporaryProjectThumbSource,
 } from '@folio/base-contract'
 import type { ArchiveToolManager } from './archive-tool.js'
 import type { ArchiveSourceDisposal } from './types.js'
@@ -601,6 +604,12 @@ export function createZpaqfranzRunner(): ArchiveCliRunner {
 }
 
 export interface ProjectArchiveService {
+  extractTemporaryThumbSource(options: {
+    readonly projectPath: string
+    readonly archiveFileName: string
+    readonly relPath: string
+    readonly signal?: AbortSignal
+  }): Promise<TemporaryProjectThumbSource>
   readonly runner: ArchiveCliRunner
   listArchiveArtifacts(projectPath: string, archiveFileName: string): Promise<ArchiveArtifactSet>
   collectTopLevelPackEntries(projectPath: string, archiveFileName: string): Promise<string[]>
@@ -617,6 +626,7 @@ export interface ProjectArchiveService {
   ensureExtractedFile(options: {
     readonly projectPath: string
     readonly projectId: string
+    readonly projectName?: string
     readonly archiveFileName: string
     readonly relPath: string
     readonly thumbKey: string
@@ -653,6 +663,7 @@ export function createProjectArchiveService(options: {
   readonly toolManager: ArchiveToolManager
   readonly native: FolioNativeService
   readonly runner?: ArchiveCliRunner
+  readonly tasks?: FolioTasksService
 }): ProjectArchiveService {
   const { toolManager, native } = options
   const runner = options.runner ?? createZpaqfranzRunner()
@@ -667,6 +678,42 @@ export function createProjectArchiveService(options: {
       throw new FolioError('archive_missing', `归档包不存在: ${archiveFileName}`, 404)
     }
     return artifacts
+  }
+
+  const extractTemporaryThumbSource: ProjectArchiveService['extractTemporaryThumbSource'] = async opts => {
+    opts.signal?.throwIfAborted()
+    if (!isPathInside(opts.projectPath, path.resolve(opts.projectPath, opts.relPath))) {
+      throw new FolioError('forbidden_path', '非法归档文件路径', 403)
+    }
+    const binaryPath = await toolManager.requireActiveBinary()
+    await ensureArchivePresent(opts.projectPath, opts.archiveFileName)
+    const root = path.join(path.dirname(toolManager.extractCacheDir), 'thumb-sources')
+    await fsp.mkdir(root, { recursive: true })
+    const resolvedRoot = await fsp.realpath(root)
+    const dir = await fsp.mkdtemp(path.join(resolvedRoot, 'item-'))
+    const release = async (): Promise<void> => {
+      const resolvedDir = await fsp.realpath(dir).catch(err => {
+        if (err.code === 'ENOENT') return null
+        throw err
+      })
+      if (resolvedDir === dir && path.dirname(resolvedDir) === resolvedRoot) {
+        await fsp.rm(resolvedDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+      }
+    }
+    const localPath = path.join(dir, path.basename(opts.relPath))
+    try {
+      await runner.extractFile({
+        binaryPath,
+        archiveAbsPath: normalizePath(path.join(opts.projectPath, opts.archiveFileName)),
+        relPath: opts.relPath,
+        destFilePath: localPath,
+        signal: opts.signal,
+      })
+      return { localPath, release }
+    } catch (err) {
+      await release()
+      throw err
+    }
   }
 
   const collectTopLevelPackEntries = async (
@@ -739,7 +786,14 @@ export function createProjectArchiveService(options: {
     const existing = inflightExtracts.get(inflightKey)
     if (existing) return existing
 
-    const promise = (async () => {
+    const promise = observeTask(options.tasks, {
+      scope: 'projects',
+      key: `extract:${opts.projectId}`,
+      title: `归档文件提取：${opts.projectName ?? opts.projectId}`,
+      item: opts.relPath,
+      meta: { projectId: opts.projectId, projectName: opts.projectName },
+      signal: opts.signal,
+    }, async () => {
       const binaryPath = await toolManager.requireActiveBinary()
       await ensureArchivePresent(opts.projectPath, opts.archiveFileName)
       const archiveAbsPath = normalizePath(path.join(opts.projectPath, opts.archiveFileName))
@@ -763,7 +817,7 @@ export function createProjectArchiveService(options: {
 
       void toolManager.pruneExtractCache(cacheTarget).catch(() => {})
       return cacheTarget
-    })().finally(() => {
+    }).finally(() => {
       inflightExtracts.delete(inflightKey)
     })
 
@@ -938,6 +992,7 @@ export function createProjectArchiveService(options: {
     disposeSourceEntries,
     removeFilesAndPruneDirs,
     ensureExtractedFile,
+    extractTemporaryThumbSource,
     extractFileInPlace,
     extractFileToDestination,
     exportArchiveToDestination,

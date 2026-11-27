@@ -7,6 +7,7 @@ import { createFolioRuntimeService } from '../../../base-runtime-host/src/host.j
 import { createFolioStorageService } from '../../../base-storage-host/src/host.js'
 import { registerBaseTasksHost } from '../../../base-tasks-host/src/host.js'
 import { createFolioThumbsService } from '../../../base-thumbs-host/src/host.js'
+import { registerFeatureThumbsEagleHost } from '../../../feature-thumbs-eagle-host/src/host.js'
 import { buildProjectSample, parseAiExtractionJson } from '../ai-sampler.js'
 import type { DshLlmLike } from '../ai-extractor.js'
 import { createWorkspaceProjectsHost, registerWorkspaceProjectsHost } from '../host.js'
@@ -80,6 +81,48 @@ async function waitForTasksDone(
 }
 
 describe('@folio/workspace-projects-host', () => {
+  it('counts project thumbnails after originals are removed and excludes unavailable files from Eagle', async () => {
+    const dataDir = await makeTempDir()
+    const libRoot = await makeTempDir()
+    const projDir = path.join(libRoot, 'Archive')
+    await fsp.mkdir(projDir)
+    await fsp.writeFile(path.join(projDir, 'cached.jpg'), 'image')
+    await fsp.writeFile(path.join(projDir, 'archived.psd'), 'design')
+    await fsp.writeFile(path.join(projDir, 'pending.psd'), 'design')
+    const storage = createFolioStorageService({ dataDir })
+    const runtime = createFolioRuntimeService({ storage, admit: () => true, trustedOrigins: [] })
+    const tasks = registerBaseTasksHost({ runtime })
+    const native = createMockNative({ renderCount: 0, opened: [], revealed: [] })
+    const thumbs = createFolioThumbsService({ native, storage, tasks: tasks.service })
+    const host = createWorkspaceProjectsHost({ runtime, storage, tasks: tasks.service, native, thumbs, workerPath: null })
+    const disposeEagle = registerFeatureThumbsEagleHost({
+      runtime, storage, tasks: tasks.service, thumbs, projectsHost: host.service,
+    })
+    try {
+      await runtime.executeAction('projects.libraries.add', { rootPath: libRoot })
+      await waitForTasksDone(runtime, 'projects')
+      const [project] = await host.service.listProjects()
+      expect(await host.service.warmProjectFileThumbs(project!.id, ['cached.jpg'])).toMatchObject({ warmed: 1 })
+      await thumbs.clearCache()
+      await fsp.unlink(path.join(projDir, 'cached.jpg'))
+      await fsp.unlink(path.join(projDir, 'archived.psd'))
+      const result = await runtime.executeAction('thumbs.eagle.project.inspect', { projectId: project!.id })
+      expect(result).toMatchObject({
+        readyCount: 1,
+        unavailableCount: 1,
+        pendingCount: 1,
+        missingCount: 0,
+        missingGroups: [],
+      })
+    } finally {
+      disposeEagle()
+      host.dispose()
+      thumbs.dispose()
+      tasks.dispose()
+      runtime.dispose()
+    }
+  })
+
   it('scans a library into .folio-meta, detects size+mtimeMs changes, syncs incrementally, and serves immutable cached thumbs', async () => {
     const dataDir = await makeTempDir()
     const libRoot = await makeTempDir()

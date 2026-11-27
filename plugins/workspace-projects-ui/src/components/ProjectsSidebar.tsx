@@ -53,6 +53,7 @@ export function ProjectsSidebar(_props: FrameViewProps): React.ReactElement {
     batchMode,
     selectedProjectIds,
     extensions,
+    extensionContext,
     setActiveLibraryId,
     selectProject,
     setSearchQuery,
@@ -79,6 +80,10 @@ export function ProjectsSidebar(_props: FrameViewProps): React.ReactElement {
   const [batchTagOpen, setBatchTagOpen] = React.useState(false)
   const [batchAddTagsText, setBatchAddTagsText] = React.useState('')
   const [batchRemoveTagsText, setBatchRemoveTagsText] = React.useState('')
+  const selectedBatchProjects = React.useMemo(
+    () => filteredProjects.filter(project => selectedProjectIds.has(project.id)),
+    [filteredProjects, selectedProjectIds],
+  )
 
   const changedCount = React.useMemo(
     () => projects.filter(p => p.hasChanges).length,
@@ -374,7 +379,9 @@ export function ProjectsSidebar(_props: FrameViewProps): React.ReactElement {
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                className="text-primary hover:underline"
+                className="text-primary hover:underline disabled:opacity-50"
+                title="全选当前列表的筛选结果"
+                disabled={filteredProjects.length === 0}
                 onClick={selectAllFilteredProjects}
               >
                 全选
@@ -429,6 +436,11 @@ export function ProjectsSidebar(_props: FrameViewProps): React.ReactElement {
               <RefreshCw size={11} className="mr-1" />
               同步
             </Button>
+            {extensions.map(extension => (
+              <React.Fragment key={extension.id}>
+                {extension.renderBatchActions?.(extensionContext, selectedBatchProjects)}
+              </React.Fragment>
+            ))}
           </div>
         </div>
       ) : null}

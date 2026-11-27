@@ -6,6 +6,11 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 ---
 
+## 0.3.0-alpha.6
+
+- 修复 `zpaqfranz backup -chunk` 生成的编号配套文件（`<stem>_00000000_backup.index` 与 `<stem>_00000000_backup.txt`）被扫描器误判为增量新增文件的问题。
+- 修复分卷归档读操作路径解析：校验（`t`）、单文件提取（`x`）、整包顺序还原/抢救（`xx` / `x -recover`）与虚拟盘挂载（`mount`）统一自动解析为 `<stem>_????????.zpaq` 通配分卷目标，兼容既有分卷包（即使 `_00000000_backup.index` 缺失也可正常提取与还原）。
+
 ## 0.3.0-alpha.5
 
 - 升级项目库归档插件（`@folio/feature-archive-host` + `@folio/feature-archive-ui`）与扫描器（`@folio/workspace-projects-host`）：新归档全面切换为 `zpaqfranz backup -chunk` 固定大小分卷模式（默认 `8GB`/卷，可在设置中调整，保留跨卷去重与 `.tmp` 中断安全，同时向后兼容既有单文件 `.zpaq`）。
@@ -86,6 +91,6 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 | 包 | 版本 |
 |---|---|
-| `localfolio-monorepo`（根）、`@folio/workbench-suite` | `0.3.0-alpha.5` |
+| `localfolio-monorepo`（根）、`@folio/workbench-suite` | `0.3.0-alpha.6` |
 | `@folio/base-storage-host`、`base-runtime-host`、`base-settings-ui`、`test-overview-host` | `0.2.0-alpha.0` |
 | 其余包（含 `@folio/test-suite`） | `0.3.0-alpha.0` |

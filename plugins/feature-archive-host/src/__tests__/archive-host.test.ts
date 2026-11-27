@@ -13,7 +13,7 @@ import type {
   ProjectCheckResult,
   ProjectDetailResult,
 } from '../../../workspace-projects-host/src/types.js'
-import type { ArchiveCliRunner } from '../archive-service.js'
+import { resolveArchiveReadFileName, type ArchiveCliRunner } from '../archive-service.js'
 import { isZpaqfranzVersionAtLeast, pickBestWindowsAsset } from '../archive-tool.js'
 import { registerFeatureArchiveHost } from '../host.js'
 import type { ArchiveToolStatus } from '../types.js'
@@ -655,11 +655,11 @@ describe('@folio/feature-archive-host', () => {
         }
         await walk(projectPath)
         bundles.set(path.join(projectPath, archiveFileName), map)
-        // Simulate zpaqfranz backup -chunk creating 2 numbered volumes + index + _backup.txt
+        // Simulate real zpaqfranz backup -chunk files: 2 numbered volumes + _00000000_backup.index + _00000000_backup.txt
         await fsp.writeFile(path.join(projectPath, `${stem}_00000001.zpaq`), 'vol1-bytes', 'utf8')
         await fsp.writeFile(path.join(projectPath, `${stem}_00000002.zpaq`), 'vol2-bytes-longer', 'utf8')
-        await fsp.writeFile(path.join(projectPath, `${stem}_index.zpaq`), 'idx', 'utf8')
-        await fsp.writeFile(path.join(projectPath, `${stem}_backup.txt`), 'hashes\n', 'utf8')
+        await fsp.writeFile(path.join(projectPath, `${stem}_00000000_backup.index`), 'idx', 'utf8')
+        await fsp.writeFile(path.join(projectPath, `${stem}_00000000_backup.txt`), 'hashes\n', 'utf8')
       },
       async test() {},
       async extractFile({ archiveAbsPath, relPath, destFilePath }) {
@@ -741,7 +741,10 @@ describe('@folio/feature-archive-host', () => {
     // Total bytes = 10 + 17 + 3 + 7 = 37
     expect(detail.manifest.archive?.archiveBytes).toBe(37)
 
-    // 2. Scanner must ignore all 4 backup-chunk artifacts (_00000001.zpaq, _00000002.zpaq, _index.zpaq, _backup.txt)
+    // 2. Scanner must ignore all 4 backup-chunk artifacts (_00000001.zpaq, _00000002.zpaq, _00000000_backup.index, _00000000_backup.txt)
+    expect(await resolveArchiveReadFileName(projDir, 'Chunked Project.zpaq')).toBe(
+      'Chunked Project_????????.zpaq',
+    )
     const checkAfterPack = await runtime.executeAction<ProjectCheckResult>('projects.checkChanges', {
       projectId: project.id,
     })
@@ -806,8 +809,8 @@ describe('@folio/feature-archive-host', () => {
     expect(observedExtractAllCalls[1]).toEqual({ sequential: true, recover: false })
     await expect(fsp.stat(path.join(projDir, 'Chunked Project_00000001.zpaq'))).rejects.toThrow()
     await expect(fsp.stat(path.join(projDir, 'Chunked Project_00000002.zpaq'))).rejects.toThrow()
-    await expect(fsp.stat(path.join(projDir, 'Chunked Project_index.zpaq'))).rejects.toThrow()
-    await expect(fsp.stat(path.join(projDir, 'Chunked Project_backup.txt'))).rejects.toThrow()
+    await expect(fsp.stat(path.join(projDir, 'Chunked Project_00000000_backup.index'))).rejects.toThrow()
+    await expect(fsp.stat(path.join(projDir, 'Chunked Project_00000000_backup.txt'))).rejects.toThrow()
 
     archiveHost.dispose()
     projectsHost.dispose()

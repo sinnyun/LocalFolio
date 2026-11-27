@@ -257,6 +257,53 @@ function runZpaqProcess(options: {
   })
 }
 
+function escapeRegExpLiteral(raw: string): string {
+  return raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Resolves the archive filename to pass to `zpaqfranz` read commands (`t`, `x`, `xx`, `mount`).
+ * For `backup -chunk` archives (`<stem>_00000001.zpaq`, …), returns `<stem>_????????.zpaq`
+ * (matching the actual digit width) so operations succeed reliably even if `_00000000_backup.index`
+ * is absent or when extracting from another working directory.
+ * For legacy single-file archives (`<stem>.zpaq`), returns `archiveFileName` unchanged.
+ */
+export async function resolveArchiveReadFileName(
+  projectPath: string,
+  archiveFileName: string,
+): Promise<string> {
+  const stem = getProjectArchiveStem(archiveFileName)
+  if (!stem) return archiveFileName
+  const entries = await fsp.readdir(projectPath, { withFileTypes: true }).catch(() => [])
+  const numberedRe = new RegExp(`^${escapeRegExpLiteral(stem)}_(\\d+)\\.zpaq$`, 'i')
+  let digitWidth = 0
+  let hasSingleFile = false
+  const lowerArchive = archiveFileName.trim().toLowerCase()
+
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    if (entry.name.toLowerCase() === lowerArchive) {
+      hasSingleFile = true
+    }
+    const m = numberedRe.exec(entry.name)
+    if (m?.[1]) {
+      digitWidth = Math.max(digitWidth, m[1].length)
+    }
+  }
+
+  if (digitWidth > 0) {
+    return `${stem}_${'?'.repeat(digitWidth)}.zpaq`
+  }
+  return hasSingleFile ? archiveFileName : archiveFileName
+}
+
+export async function resolveArchiveReadPath(archiveAbsPath: string): Promise<string> {
+  const dir = path.dirname(archiveAbsPath)
+  const base = path.basename(archiveAbsPath)
+  const resolvedName = await resolveArchiveReadFileName(dir, base)
+  return path.join(dir, resolvedName)
+}
+
 export function createZpaqfranzRunner(): ArchiveCliRunner {
   return {
     async add({
@@ -291,6 +338,12 @@ export function createZpaqfranzRunner(): ArchiveCliRunner {
               `${stem}_*.zpaq`,
               '-not',
               `${stem}_backup.txt`,
+              '-not',
+              `${stem}_backup.index`,
+              '-not',
+              `${stem}_*_backup.txt`,
+              '-not',
+              `${stem}_*_backup.index`,
               '-not',
               '*.tmp',
               '-not',
@@ -333,9 +386,10 @@ export function createZpaqfranzRunner(): ArchiveCliRunner {
     },
 
     async test({ binaryPath, projectPath, archiveFileName, signal, onProgress }) {
+      const readTarget = await resolveArchiveReadFileName(projectPath, archiveFileName)
       await runZpaqProcess({
         binaryPath,
-        args: ['t', archiveFileName],
+        args: ['t', readTarget],
         cwd: projectPath,
         signal,
         onOutput: (line, pct) => onProgress?.(pct, line),
@@ -347,12 +401,13 @@ export function createZpaqfranzRunner(): ArchiveCliRunner {
     async extractFile({ binaryPath, archiveAbsPath, relPath, destFilePath, signal }) {
       const posixRel = relPath.split(path.sep).join('/')
       const destDir = path.dirname(destFilePath)
+      const readTargetAbs = await resolveArchiveReadPath(archiveAbsPath)
       await fsp.mkdir(destDir, { recursive: true })
 
       try {
         await runZpaqProcess({
           binaryPath,
-          args: ['x', archiveAbsPath, posixRel, '-to', destFilePath, '-force'],
+          args: ['x', readTargetAbs, posixRel, '-to', destFilePath, '-force'],
           cwd: destDir,
           signal,
           errorCode: 'archive_extract_failed',
@@ -369,7 +424,7 @@ export function createZpaqfranzRunner(): ArchiveCliRunner {
       try {
         await runZpaqProcess({
           binaryPath,
-          args: ['x', archiveAbsPath, '-only', posixRel, '-force'],
+          args: ['x', readTargetAbs, '-only', posixRel, '-force'],
           cwd: stageDir,
           signal,
           errorCode: 'archive_extract_failed',
@@ -399,9 +454,10 @@ export function createZpaqfranzRunner(): ArchiveCliRunner {
       signal,
       onProgress,
     }) {
+      const readTarget = await resolveArchiveReadFileName(projectPath, archiveFileName)
       const args = recover
-        ? ['x', archiveFileName, '-recover', '-force']
-        : [sequential ? 'xx' : 'x', archiveFileName, '-force']
+        ? ['x', readTarget, '-recover', '-force']
+        : [sequential ? 'xx' : 'x', readTarget, '-force']
 
       await runZpaqProcess({
         binaryPath,
@@ -416,9 +472,10 @@ export function createZpaqfranzRunner(): ArchiveCliRunner {
 
     async mount({ binaryPath, projectPath, archiveAbsPath, allVersions = false, driveLetter }) {
       const normalizedDrive = driveLetter?.trim()
+      const readTargetAbs = await resolveArchiveReadPath(archiveAbsPath)
       const args = [
         'mount',
-        archiveAbsPath,
+        readTargetAbs,
         ...(normalizedDrive ? [normalizedDrive] : []),
         ...(allVersions ? ['-all'] : []),
       ]

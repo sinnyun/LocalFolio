@@ -1,14 +1,19 @@
 # CHANGELOG
 
-LocalFolio 的能力演进记录。
-
-> **这不是正式发布日志**：仓库没有打 tag，也没有按版本维护的发布记录。下面的分组只依据两件可验证的事实——`package.json` 里的当前版本号，和 `git log` 的提交顺序。它区分的是「`0.3.0-alpha.0` 这一轮新增了什么」与「这一轮没有改动、仍停在 `0.2.0-alpha.0` 的基座」，**不构成任何兼容性承诺**。
+LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub Releases](https://github.com/sinnyun/LocalFolio/releases)。
 
 最新在前。
 
 ---
 
-## 0.3.0-alpha.0（当前工作版本）
+## 0.3.0-alpha.2
+
+- GitHub Actions 随版本标签构建、校验并发布 `localfolio-workbench.tgz`。已验证 Windows DSH `0.2.2-rc.5` 能从 GitHub 附件地址安装并启动工作台。[发布记录](https://github.com/sinnyun/LocalFolio/releases/tag/v0.3.0-alpha.2)
+- 修复干净克隆缺失的 UI Kit 源文件，以及 Tailwind 构建对 `cmd.exe` 的依赖。
+- 修复启用工作台时，存储适配层向 DSH 文件接口传递路径字符串导致的桌面 Host 崩溃。
+- 修复 Ubuntu 上解析 Windows Eagle `.info` 路径的兼容性问题。
+
+## 0.3.0-alpha.0
 
 ### 新增
 
@@ -65,6 +70,6 @@ LocalFolio 的能力演进记录。
 
 | 包 | 版本 |
 |---|---|
-| `localfolio-monorepo`（根） | `0.3.0-alpha.0` |
+| `localfolio-monorepo`（根）、`@folio/workbench-suite` | `0.3.0-alpha.2` |
 | `@folio/base-storage-host`、`base-runtime-host`、`base-settings-ui`、`test-overview-host` | `0.2.0-alpha.0` |
-| 其余全部（`base-ui-kit`、`base-shell-ui`、`base-frame-ui`、`bridge-*`、`workspace-*`、`test-*-ui`、两个套件） | `0.3.0-alpha.0` |
+| 其余包（含 `@folio/test-suite`） | `0.3.0-alpha.0` |

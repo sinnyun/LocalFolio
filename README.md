@@ -2,6 +2,8 @@
 
 **基于 DeepSeek Harness (DSH) 原生体系持续增量演进的个人工作台。**
 
+[安装与升级](#daily-use) · [本地开发](#local-development) · [打包与发布](#release-workflow)
+
 > **核心理念**：LocalFolio 不是「盖在 DSH 外面、通过 Shadow DOM 隔离重构的独立软件」，而是**在 DSH 现有能力基础上不断追加新功能的增量插件集合**。
 > 凡是 DSH 已提供的能力（主题令牌、槽位、快捷键、底层文件能力、设置框架、单实例平台库），一律直接复用；只有 DSH 尚未提供或不满足工作台场景的能力，才拆成细粒度的标准 DSH 插件按需叠加，最后由工作台套件合装成一个整体。DSH 官方规范要求插件不加载其 Client 组件包（导出随时会变、抛错会空白整个槽位），因此基础控件与图标由独立插件 `@folio/base-ui-kit`（基于 Radix UI + `lucide-react` + `.lf-*` 样式）按 `--dsw-*` 令牌实现，并通过 `dsh.client.external` 单实例共享给所有 UI 插件。
 
@@ -86,7 +88,7 @@
 形态后缀按需使用：`-host`（Host 侧能力）、`-ui`（Client 界面）、`-kit`（组件库）。
 
 ```text
-F:\AI\geren\LocalFolio\
+LocalFolio/
 ├── bundles/
 │   ├── workbench-suite/            @folio/workbench-suite    产品安装入口：6 基础能力 + 2 桥接 + 3 工作区（不含 test-*）
 │   └── test-suite/                 @folio/test-suite         测试界面套件：六个 test-* 验证界面，按需另装
@@ -134,68 +136,71 @@ F:\AI\geren\LocalFolio\
 
 ## 五、使用指南
 
-### 1. 构建与校验
+<a id="daily-use"></a>
 
-```powershell
-cd F:\AI\geren\LocalFolio
-pnpm install
-pnpm run verify          # 类型检查 + 全插件构建 + 产物语法校验 + 单元测试
-```
+### 1. 安装、使用与升级
 
-### 2. 开发期热重载（单插件局部 HMR）
-
-```powershell
-pnpm run build:watch     # 修改哪个 plugins/* 就只重编该插件的 lib/client.js，约 1 秒后 DSH 自动局部热替换
-```
-
-### 3. 安装到 DSH profile
-
-#### 安装 GitHub 发布包
-
-在 GitHub Releases 中复制对应版本的 `localfolio-workbench.tgz` 下载地址，粘贴到 DSH 的「插件 → 添加插件 → 包名或地址」。地址格式如下：
+已在 Windows 上用 DSH `0.2.2-rc.5` 验证。打开 DSH 的「插件 → 添加插件」，把 [GitHub Releases](https://github.com/sinnyun/LocalFolio/releases) 中所选版本的 `localfolio-workbench.tgz` 下载地址粘贴到「包名或地址」。已验证的预发布版本：
 
 ```text
-https://github.com/sinnyun/LocalFolio/releases/download/<版本标签>/localfolio-workbench.tgz
+https://github.com/sinnyun/LocalFolio/releases/download/v0.3.0-alpha.2/localfolio-workbench.tgz
 ```
 
-归档包含正式工作台套件、它的子插件及画板静态资源。也可以先下载 `.tgz`，再将文件的绝对路径填入同一处。
+安装后，在插件页启用 `@folio/workbench-suite`，按 DSH 提示重启。点「工作台」进入，顶部可切换文件浏览器、画板、物料和项目库。点「返回 DSH」或按 `Esc` 回到 DSH。
 
-发布时，将与 `bundles/workbench-suite/package.json` 中 `version` 对应的 `v<版本>` 标签推送到 GitHub。Actions 会构建、运行校验、在临时 DSH profile 中试装，并把归档上传到该标签的 GitHub Release。可在本地运行 `pnpm run build` 和 `pnpm run pack:workbench` 生成 `dist/localfolio-workbench.tgz`。
+升级时，从 Releases 复制新版本的 `.tgz` 地址，在同一入口安装。若 DSH 提示已安装，先在插件页卸载 `@folio/workbench-suite`，再安装新地址。需要回退时，同样可以安装旧版本的地址。网络下载失败时，也可从 Releases 下载 `.tgz`，在「包名或地址」中填入文件的绝对路径。工作台的本地数据位置见[运行时数据目录](#runtime-data)。
 
-归档随附 [tldraw 5.6.2 许可证](bundles/workbench-suite/docs/licenses/tldraw-5.6.2.md)。面向最终用户部署画板前，请确认你的 tldraw 授权覆盖该场景。
+<a id="local-development"></a>
 
-#### 本地开发安装
+### 2. Windows 本地开发
+
+使用 PowerShell 7，构建环境与 CI 对齐为 Node.js 24 和 pnpm 10.28.0。在仓库根目录执行：
 
 ```powershell
-# 1) 以 link: 方式把两个套件装入 profile（默认 lfdev）：
-#    @folio/workbench-suite  产品入口（6 基础能力 + 2 桥接 + 3 工作区）
-#    @folio/test-suite       六个 test-* 验证界面
-pwsh -File scripts/lfdev.ps1 install
-
-# 其他 profile 也可以，例如给某个隔离环境（desktop 除外，见下）
-pwsh -File scripts/lfdev.ps1 install -Profile someprofile
-
-# 只想验证产品安装形态，不装测试界面：
-dsh plugin --profile lfdev add link:F:\AI\geren\LocalFolio\bundles\workbench-suite
-
-# 2) 启动实例（默认端口 3081）
-pwsh -File scripts/lfdev.ps1 restart
-
-# 3) 获取访问地址并校验所有 client 插件均已进入 boot payload
-$u = pwsh -File scripts/lfdev.ps1 url
-pwsh -File scripts/lfdev.ps1 verify
-
-# 4) 停掉实例
-pwsh -File scripts/lfdev.ps1 stop
+pnpm install --frozen-lockfile
+pnpm run verify
 ```
 
-> **桌面版（`desktop` profile）不能用 CLI 安装**：DSH 对 `desktop` 有硬性保护，`dsh plugin --profile desktop …` 会直接报 `managed exclusively by the Electron application`。请在应用内的插件管理里添加依赖，spec 填：
->
-> ```text
-> link:F:\AI\geren\LocalFolio\bundles\workbench-suite
-> ```
->
-> 需要测试界面时再加一条 `link:F:\AI\geren\LocalFolio\bundles\test-suite`。重启应用后生效；套件内的子插件仍可在 DSH 插件管理页单独启停。
+`verify` 依次运行类型检查、构建、产物语法检查和单元测试。日常调试用独立的 `lfdev` profile。把下面的 `$dshRoot` 换成自己的 DSH 安装目录，确保端口 `3081` 可用，也可给每条命令统一传 `-Port <空闲端口>`。
+
+```powershell
+$dshRoot = 'D:\DSH'
+$env:DSH_EXE = Join-Path $dshRoot 'DeepSeek Harness.exe'
+$env:DSH_BIN = Join-Path $dshRoot 'resources\app.asar\dsh\node_modules\@deepseek-ai\dsh-desktop-host\lib\cli.js'
+
+pwsh -File scripts/lfdev.ps1 install
+pwsh -File scripts/lfdev.ps1 restart
+pwsh -File scripts/lfdev.ps1 url
+pwsh -File scripts/lfdev.ps1 verify
+```
+
+`install` 用 `link:` 安装产品和测试两个套件。打开 `url` 打印的本地地址，再另开终端运行 `pnpm run build:watch`。Client 改动会重新构建，在 DSH 启用 HMR 时可热加载。Host、套件清单或补丁改动后，用 `restart` 重启开发实例。调试结束运行 `pwsh -File scripts/lfdev.ps1 stop`。新增工作区或子插件时，按下方[新增工作区](#add-workspace)的清单更新套件。
+
+<a id="release-workflow"></a>
+
+### 3. 本地打包与 GitHub 发布
+
+本地验证发布包时，在仓库根目录运行：
+
+```powershell
+pnpm run verify
+pnpm run pack:workbench
+```
+
+打包使用系统的 `tar`。生成的 `dist/localfolio-workbench.tgz` 可直接在 DSH 中按绝对路径试装。它包含产品工作台、子插件、Worker 和画板静态资源。`@folio/test-suite` 通过开发链接单独安装。归档随附 [tldraw 5.6.2 许可证](bundles/workbench-suite/docs/licenses/tldraw-5.6.2.md)。面向最终用户部署画板前，请确认你的 tldraw 授权覆盖该场景。
+
+准备发布时，先把根 `package.json` 和 `bundles/workbench-suite/package.json` 的 `version` 改成同一个新版本，完成校验并提交。先推送提交，再推送与套件版本对应的 `v<版本>` 标签：
+
+```powershell
+git push origin main
+$tag = 'v' + (node -p 'require("./bundles/workbench-suite/package.json").version')
+git tag $tag HEAD
+git push origin "refs/tags/$tag"
+```
+
+[发布工作流](.github/workflows/release-workbench.yml) 由标签推送触发。它在 Ubuntu 上按锁文件安装依赖、构建并测试、在临时 DSH profile 试装，成功后把 `localfolio-workbench.tgz` 上传到该标签的 Release。到 [Actions](https://github.com/sinnyun/LocalFolio/actions) 确认结果，再从 Release 复制附件地址，放进一个干净的 DSH profile 验证安装和启动。每次发布使用新的版本号和标签。
+
+<a id="add-workspace"></a>
 
 ### 4. 如何新增一个工作区
 
@@ -213,11 +218,11 @@ pwsh -File scripts/lfdev.ps1 stop
    - 直接从 `@folio/base-ui-kit/client` 引入通用 shadcn/Radix 控件与图标，并可直接使用 Tailwind 工具类（由 `@folio/base-ui-kit` 的 `@source "../../";` 统一编译进单份无 Preflight 样式表，`build:watch` 自动联动刷新）；
    - 专属图标可直接 `import { ... } from 'lucide-react'`（esbuild 按图标 tree-shake，约 300B/个）；
    - 如需给基础能力补充通用 shadcn 原语：直接运行 `pnpm run ui:add <组件名或URL>`。
-3. **补齐显示与安装元信息**：`package.json` 加 `engines.dsh`（如 `^0.2.2-rc.5`）、`exports["./locale/*.json"]`、`exports["./icon"]`，`files` 带上 `locale` 与 `icon.svg`；写 `locale/zh.json` 与 `locale/en.json` 的 `meta.title`/`meta.description`（可选 `meta.detail` 指向 `docs/DETAIL.md`）。
+3. **补齐显示与安装元信息**：参考同类插件的 `package.json`，声明 `engines.dsh`、构建后的 Host 和 Client 入口、图标和语言文件的导出。`files` 列出要随归档发布的 `lib`、`locale`、`icon.svg` 和实际存在的文档目录。写好 `locale/zh.json` 和 `locale/en.json` 的 `meta.title` 与 `meta.description`。
 4. **加入套件**：产品工作区加进 `bundles/workbench-suite/{package.json,cordis.patch.yml}`；验证用的临时界面加进 `bundles/test-suite` 的同名两处，不要进产品套件。
 5. **登记到插件清单**：在 `plugins/base-runtime-host/src/host.ts` 的 `createDefaultPluginManifest()` 里补一条 `category: 'workspace'` 的记录（内嵌第三方引擎另登记到 `internalExtensions`），否则设置页「我的插件」里看不到它。
 6. **同步验证名单**：`scripts/lfdev.ps1` 的 `$ExpectedClientPlugins` 加上新的 client 插件包名，`lfdev.ps1 verify` 才会校验它确实进入 boot payload。
-7. 运行 `pnpm install --offline && pnpm run verify`，重启 Host 或等 Client HMR 生效即可。
+7. 新增 workspace 包或改动依赖后，运行 `pnpm install` 并提交更新后的 `pnpm-lock.yaml`。运行 `pnpm run verify`，再重启开发实例验证加载。
 
 ### 4.1 工作区内部的功能插件：只声明四个区域
 
@@ -271,6 +276,8 @@ const session = ctx.folioInteractions.createFileDragSession({ kind: 'url', url, 
 没有 DSH 原生服务时 `hasNativeContextMenu()` / `hasNativeFileDrag()` / `canSaveAs()` 返回 `false`，桥接层自动退到工作台内置菜单与浏览器下载，工作区代码不需要分支。契约见 [`plugins/bridge-dsh-interactions-ui/docs/DETAIL.md`](plugins/bridge-dsh-interactions-ui/docs/DETAIL.md)。
 
 ---
+
+<a id="runtime-data"></a>
 
 ## 六、运行时数据目录
 

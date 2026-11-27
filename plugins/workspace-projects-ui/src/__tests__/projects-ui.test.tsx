@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FrameController } from '@folio/base-contract'
 import { dispatchFolioTopic } from '@folio/base-contract/rpc'
 import { ProjectsInspector } from '../components/ProjectsInspector.js'
+import { ProjectsLeft } from '../components/ProjectsLeft.js'
 import { ProjectsMain } from '../components/ProjectsMain.js'
-import { ProjectsSidebar } from '../components/ProjectsSidebar.js'
 import { ProjectsStatus } from '../components/ProjectsStatus.js'
 import { ProjectsProvider } from '../context.js'
 import type {
@@ -64,6 +64,32 @@ const sampleIndex: LibraryIndex = {
       changeSummary: { added: 1, modified: 0, removed: 0 },
       missing: false,
       metaWritable: true,
+    },
+  ],
+}
+
+const multiLibraryIndex: LibraryIndex = {
+  version: 1,
+  libraries: [
+    sampleIndex.libraries[0]!,
+    {
+      id: 'lib_2',
+      name: '2025 归档库',
+      rootPath: 'D:\\Archives\\2025',
+      addedAt: 1700000000000,
+      lastScannedAt: 1700000002000,
+      projectCount: 1,
+    },
+  ],
+  projects: [
+    sampleIndex.projects[0]!,
+    {
+      ...sampleIndex.projects[0]!,
+      id: 'prj_2',
+      libraryId: 'lib_2',
+      name: 'Second Campaign',
+      path: 'D:\\Archives\\2025\\Second Campaign',
+      tags: ['KV', '旧档'],
     },
   ],
 }
@@ -321,11 +347,11 @@ describe('@folio/workspace-projects-ui', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders sidebar, grouped cards, change sync banner, and live SSE task bar', async () => {
-    render(
+  it('navigates from project cards into a project and back, and keeps the detail surfaces working', async () => {
+    const { container } = render(
       <ProjectsProvider appId="projects.library" frame={mockFrame}>
         <div className="flex h-[720px] w-[1200px]">
-          <ProjectsSidebar appId="projects.library" frame={mockFrame} />
+          <ProjectsLeft appId="projects.library" frame={mockFrame} />
           <ProjectsMain appId="projects.library" frame={mockFrame} />
           <ProjectsInspector appId="projects.library" frame={mockFrame} />
         </div>
@@ -333,9 +359,18 @@ describe('@folio/workspace-projects-ui', () => {
       </ProjectsProvider>,
     )
 
+    // The default surface is the card overview with the library list on the left.
+    await waitFor(() => {
+      expect(container.querySelector('[data-lf-project-card="prj_1"]')).toBeTruthy()
+    })
+    expect(container.querySelector('[data-lf-projects-overview-sidebar]')).toBeTruthy()
+
+    fireEvent.click(container.querySelector('[data-lf-project-card="prj_1"]') as HTMLButtonElement)
+
     await waitFor(() => {
       expect(screen.getByText('hero.jpg')).toBeTruthy()
       expect(screen.getByText('brief.pdf')).toBeTruthy()
+      expect(container.querySelector('[data-lf-projects-sidebar]')).toBeTruthy()
     })
 
     // Change banner is visible and sync button triggers projects.sync
@@ -419,6 +454,76 @@ describe('@folio/workspace-projects-ui', () => {
         expect.anything(),
       )
     })
+
+    // Both the sidebar and the center toolbar can return to the project cards.
+    fireEvent.click(screen.getAllByRole('button', { name: '返回项目卡片' })[0]!)
+    await waitFor(() => {
+      expect(container.querySelector('[data-lf-project-card="prj_1"]')).toBeTruthy()
+      expect(container.querySelector('[data-lf-projects-overview-sidebar]')).toBeTruthy()
+    })
+    expect(screen.queryByText('hero.jpg')).toBeNull()
+  })
+
+  it('scopes project cards by library and preserves the scope after returning from a project', async () => {
+    fetchSpy.mockImplementation(async (url: string) => {
+      const action = decodeURIComponent(String(url).split('/lf/rpc/')[1] ?? '')
+      if (action === 'projects.libraries.list') {
+        return new Response(JSON.stringify({ ok: true, data: multiLibraryIndex }), {
+          status: 200,
+        })
+      }
+      if (action === 'projects.detail.get') {
+        return new Response(JSON.stringify({ ok: true, data: sampleDetail }), { status: 200 })
+      }
+      if (action === 'projects.ai.status') {
+        return new Response(
+          JSON.stringify({ ok: true, data: { available: false, defaultRoute: null, models: [] } }),
+          { status: 200 },
+        )
+      }
+      if (action === 'tasks.list') {
+        return new Response(JSON.stringify({ ok: true, data: { tasks: [] } }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ ok: true, data: {} }), { status: 200 })
+    })
+
+    const { container } = render(
+      <ProjectsProvider appId="projects.library" frame={mockFrame}>
+        <div className="flex h-[720px] w-[1200px]">
+          <ProjectsLeft appId="projects.library" frame={mockFrame} />
+          <ProjectsMain appId="projects.library" frame={mockFrame} />
+        </div>
+      </ProjectsProvider>,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-lf-project-card="prj_1"]')).toBeTruthy()
+      expect(container.querySelector('[data-lf-project-card="prj_2"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('[data-lf-project-library="lib_1"]') as HTMLButtonElement)
+    await waitFor(() => {
+      expect(container.querySelector('[data-lf-project-card="prj_1"]')).toBeTruthy()
+      expect(container.querySelector('[data-lf-project-card="prj_2"]')).toBeNull()
+    })
+
+    fireEvent.click(container.querySelector('[data-lf-project-card="prj_1"]') as HTMLButtonElement)
+    await waitFor(() => {
+      expect(screen.getByText('hero.jpg')).toBeTruthy()
+    })
+
+    fireEvent.click(screen.getAllByRole('button', { name: '返回项目卡片' })[0]!)
+    await waitFor(() => {
+      expect(container.querySelector('[data-lf-project-card="prj_1"]')).toBeTruthy()
+    })
+    expect(container.querySelector('[data-lf-project-card="prj_2"]')).toBeNull()
+
+    fireEvent.click(
+      container.querySelector('[data-lf-project-library="__all__"]') as HTMLButtonElement,
+    )
+    await waitFor(() => {
+      expect(container.querySelector('[data-lf-project-card="prj_2"]')).toBeTruthy()
+    })
   })
 
   it('attaches scroll listener after late mount and renders items below the initial viewport on scroll', async () => {
@@ -479,6 +584,11 @@ describe('@folio/workspace-projects-ui', () => {
         <ProjectsMain appId="projects.library" frame={mockFrame} />
       </ProjectsProvider>,
     )
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-lf-project-card="prj_1"]')).toBeTruthy()
+    })
+    fireEvent.click(container.querySelector('[data-lf-project-card="prj_1"]') as HTMLButtonElement)
 
     await waitFor(() => {
       expect(screen.getByText('item-01.jpg')).toBeTruthy()

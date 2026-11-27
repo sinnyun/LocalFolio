@@ -9,8 +9,8 @@ import type {
 } from '@folio/base-contract'
 import { FolderKanban } from 'lucide-react'
 import { ProjectsInspector } from './components/ProjectsInspector.js'
+import { ProjectsLeft } from './components/ProjectsLeft.js'
 import { ProjectsMain } from './components/ProjectsMain.js'
-import { ProjectsSidebar } from './components/ProjectsSidebar.js'
 import { ProjectsStatus } from './components/ProjectsStatus.js'
 import { ProjectsProvider } from './context.js'
 import { createFolioProjectsUiService } from './extension-registry.js'
@@ -44,7 +44,7 @@ export function createProjectsApp(
     pluginId: '@folio/workspace-projects-ui',
     icon: ProjectsWorkspaceIcon,
     order: 1,
-    rightTitle: '项目详情与元数据',
+    rightTitle: '项目信息',
     leftCollapse: 'icon',
     defaultLayout: {
       leftWidth: 280,
@@ -53,7 +53,7 @@ export function createProjectsApp(
       rightCollapsed: false,
     },
     Provider: BoundProjectsProvider,
-    Left: ProjectsSidebar,
+    Left: ProjectsLeft,
     Main: ProjectsMain,
     Right: ProjectsInspector,
     Status: ProjectsStatus,

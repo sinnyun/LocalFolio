@@ -14,6 +14,7 @@
 | 文档 | 内容 |
 |---|---|
 | [`GLOSSARY.md`](GLOSSARY.md) | 术语表，本书所有专有名词以它为准 |
+| [`docs/local-development.md`](docs/local-development.md) | 本地构建、链接挂载与启动报错对照（改完代码跑不起来先看这里） |
 | [`docs/adr/`](docs/adr/) | 架构决策记录：为什么这样切分外壳、框架、工作区 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本演进与能力新增记录 |
 | [`docs/agents/`](docs/agents/) | 协作约定：issue 追踪、triage 标签、领域文档消费方式 |
@@ -62,7 +63,7 @@
 | **文件浏览器** | 形态 A（四区） | 快捷文件夹、驱动器容量、懒加载文件树、双栏浏览与可编辑面包屑、Windows 系统缩略图、音视频与文本预览、文件检查器（[DETAIL](plugins/workspace-files-ui/docs/DETAIL.md)） |
 | **画板** | 形态 A（四区） | tldraw 无限画布；图片只存本地文件链接，分层 LOD 代理渲染（256/512/1024/2048），浏览器拖入图片自动导入托管目录，断链检测与批量重定位（[DETAIL](plugins/workspace-canvas-ui/docs/DETAIL.md)） |
 | **物料** | 形态 A（四区） | 关联 A3 横版 `.vectorcraft` 文件；页面多选导出单图/多页 PDF；幻灯片式拖拽排序；物料信息头与 VectorCraft 前台双向同步；默认/项目两套物料数据表（[DETAIL](plugins/workspace-materials-ui/docs/DETAIL.md)） |
-| **项目库** | 形态 A（四区） | 多归档根目录管理、Worker 线程非阻塞扫描、`.folio-meta` 就地元数据与按需双尺寸缩略图缓存、`size+mtimeMs` 增量变更检测、DSH `ctx.llm` 目录采样与 AI 标签/摘要提取、多选批量管理、虚拟滚动列表与可折叠分组虚拟卡片网格（[DETAIL](plugins/workspace-projects-ui/docs/DETAIL.md)） |
+| **项目库** | 形态 A（四区） | 多归档根目录管理、Worker 线程非阻塞扫描、`.folio-meta` 就地元数据与按需双尺寸缩略图缓存、`size+mtimeMs` 增量变更检测、DSH `ctx.llm` 目录采样与 AI 标签/摘要提取、多选批量管理、项目卡片总览（全部库/单库切换）→ 项目文件分组卡片网格的两级浏览与左侧栏随层级切换（[DETAIL](plugins/workspace-projects-ui/docs/DETAIL.md)） |
 | **任务监控** | 形态 A（中心视图）与跨工作区浮窗 | 按工作区、项目与状态查看当前运行实例的后台任务、子项进度和失败详情。标题栏入口使用可拖动、可缩放悬浮面板。 |
 
 ### 内部扩展
@@ -121,7 +122,7 @@ LocalFolio/
 │   ├── workspace-materials-host/   @folio/workspace-materials-host    物料后端（VectorCraft 桥接、导出、文件监听）
 │   ├── workspace-materials-ui/     @folio/workspace-materials-ui      物料工作区
 │   ├── workspace-projects-host/    @folio/workspace-projects-host     项目库后端（Worker 扫描、.folio-meta、按需缩略图、变更检测）
-│   ├── workspace-projects-ui/      @folio/workspace-projects-ui       项目库工作区（虚拟化列表与分组卡片网格）
+│   ├── workspace-projects-ui/      @folio/workspace-projects-ui       项目库工作区（项目卡片总览 + 项目内虚拟化文件网格）
 │   │  ── 测试界面（只进 test-suite）──
 │   ├── test-overview-host/         @folio/test-overview-host  测试概览后端                      ┐
 │   ├── test-overview-ui/           @folio/test-overview-ui    测试概览 UI（形态 A + 悬浮面板）  │
@@ -165,9 +166,14 @@ https://github.com/sinnyun/LocalFolio/releases/download/v0.3.0-alpha.4/localfoli
 使用 PowerShell 7，构建环境与 CI 对齐为 Node.js 24 和 pnpm 10.28.0。在仓库根目录执行：
 
 ```powershell
-pnpm install --frozen-lockfile
+pnpm install --offline --frozen-lockfile --trust-lockfile
 pnpm run verify
 ```
+
+本机 `pnpm install` 会在供应链校验那一步逐个回源 `registry.npmmirror.com` 而长时间卡住，`--trust-lockfile`
+跳过该校验、`--offline` 只用本地 store。构建或启动报错时先查
+[`docs/local-development.md`](docs/local-development.md)：那里按症状列了 TS2307 成片缺模块、
+`pnpm install` 卡死、工作台入口不出现等常见故障的成因与修复命令。
 
 `verify` 依次运行类型检查、构建、产物语法检查和单元测试。日常调试用独立的 `lfdev` profile。把下面的 `$dshRoot` 换成自己的 DSH 安装目录，确保端口 `3081` 可用，也可给每条命令统一传 `-Port <空闲端口>`。
 

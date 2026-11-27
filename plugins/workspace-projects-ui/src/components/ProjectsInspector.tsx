@@ -27,8 +27,18 @@ import {
 import type { FileCategory } from '../types.js'
 import { AiTraceDialog } from './AiTraceDialog.js'
 import { LazyThumbImage } from './LazyThumbImage.js'
+import { ProjectsOverviewInspector } from './ProjectsOverviewInspector.js'
 
-export function ProjectsInspector(_props: FrameViewProps): React.ReactElement {
+export function ProjectsInspector(props: FrameViewProps): React.ReactElement {
+  const { selectedProject } = useProjects()
+  return selectedProject ? (
+    <ProjectDetailInspector {...props} />
+  ) : (
+    <ProjectsOverviewInspector />
+  )
+}
+
+function ProjectDetailInspector(_props: FrameViewProps): React.ReactElement {
   const {
     aiStatus,
     aiApplyCover,
@@ -74,7 +84,7 @@ export function ProjectsInspector(_props: FrameViewProps): React.ReactElement {
         data-lf-projects-inspector=""
         className="flex h-full items-center justify-center p-4 text-xs text-muted-foreground"
       >
-        选择项目后在此查看详情与元数据
+        正在加载项目详情…
       </div>
     )
   }

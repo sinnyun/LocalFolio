@@ -6,6 +6,7 @@ import {
 import type { FrameViewProps } from '@folio/base-contract'
 import {
   AlertTriangle,
+  ArrowLeft,
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
@@ -50,6 +51,7 @@ import type {
   SortMode,
 } from '../types.js'
 import { LazyThumbImage } from './LazyThumbImage.js'
+import { ProjectsOverview } from './ProjectsOverview.js'
 
 const ZOOM_DIMENSIONS: Record<CardZoom, { minWidth: number; rowHeight: number; thumbH: string }> = {
   sm: { minWidth: 136, rowHeight: 176, thumbH: 'h-24' },
@@ -57,7 +59,12 @@ const ZOOM_DIMENSIONS: Record<CardZoom, { minWidth: number; rowHeight: number; t
   lg: { minWidth: 228, rowHeight: 268, thumbH: 'h-44' },
 }
 
-export function ProjectsMain(_props: FrameViewProps): React.ReactElement {
+export function ProjectsMain(props: FrameViewProps): React.ReactElement {
+  const { overviewActive } = useProjects()
+  return overviewActive ? <ProjectsOverview {...props} /> : <ProjectFilesView {...props} />
+}
+
+function ProjectFilesView(_props: FrameViewProps): React.ReactElement {
   const {
     libraries,
     selectedProject,
@@ -75,6 +82,7 @@ export function ProjectsMain(_props: FrameViewProps): React.ReactElement {
     extensions,
     extensionContext,
     lightbox,
+    closeProject,
     selectFile,
     setFileSearchQuery,
     setCategoryFilter,
@@ -179,21 +187,34 @@ export function ProjectsMain(_props: FrameViewProps): React.ReactElement {
     >
       {/* Top Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h2 className="truncate text-sm font-semibold">{selectedProject.name}</h2>
-            {selectedProject.projectType ? (
-              <Badge variant="secondary" className="text-[11px]">
-                {selectedProject.projectType}
-              </Badge>
-            ) : null}
-            {extensions.map(ext => (
-              <React.Fragment key={ext.id}>
-                {ext.renderProjectBadges?.(selectedProject, 'header')}
-              </React.Fragment>
-            ))}
+        <div className="flex min-w-0 items-center gap-2">
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 shrink-0"
+            title="返回项目卡片"
+            aria-label="返回项目卡片"
+            onClick={closeProject}
+          >
+            <ArrowLeft size={15} />
+          </Button>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h2 className="truncate text-sm font-semibold">{selectedProject.name}</h2>
+              {selectedProject.projectType ? (
+                <Badge variant="secondary" className="text-[11px]">
+                  {selectedProject.projectType}
+                </Badge>
+              ) : null}
+              {extensions.map(ext => (
+                <React.Fragment key={ext.id}>
+                  {ext.renderProjectBadges?.(selectedProject, 'header')}
+                </React.Fragment>
+              ))}
+            </div>
+            <p className="truncate text-[11px] text-muted-foreground">{selectedProject.path}</p>
           </div>
-          <p className="truncate text-[11px] text-muted-foreground">{selectedProject.path}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">

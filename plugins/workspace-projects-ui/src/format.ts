@@ -1,6 +1,11 @@
 import { compareNaturalName } from '@folio/base-collection-ui/client'
 import { categoryLabel, formatBytes, formatDateTime } from '@folio/base-ui-kit/client'
-import type { ProjectFileEntry, ProjectFolderGroup, SortMode } from './types.js'
+import type {
+  ProjectFileEntry,
+  ProjectFolderGroup,
+  ProjectSummary,
+  SortMode,
+} from './types.js'
 
 export { categoryLabel, formatBytes, formatDateTime }
 
@@ -44,6 +49,45 @@ export function sortFiles(files: readonly ProjectFileEntry[], mode: SortMode): P
   copy.sort((a, b) => {
     if (mode === 'size') return b.size - a.size || a.name.localeCompare(b.name)
     if (mode === 'mtime') return b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name)
+    return compareNaturalName(a.name, b.name)
+  })
+  return copy
+}
+
+export function matchProject(
+  project: ProjectSummary,
+  query: string,
+  tagFilter: string | null,
+  onlyChanged: boolean,
+): boolean {
+  if (onlyChanged && !project.hasChanges) return false
+  if (tagFilter && !project.tags.includes(tagFilter)) return false
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  const hay =
+    `${project.name} ${project.projectType} ${project.summary} ${project.tags.join(' ')}`.toLowerCase()
+  return hay.includes(q)
+}
+
+export function filterProjects(
+  projects: readonly ProjectSummary[],
+  query: string,
+  tagFilter: string | null,
+  onlyChanged: boolean,
+): ProjectSummary[] {
+  return projects.filter(project => matchProject(project, query, tagFilter, onlyChanged))
+}
+
+export function sortProjects(
+  projects: readonly ProjectSummary[],
+  mode: SortMode,
+): ProjectSummary[] {
+  const copy = [...projects]
+  copy.sort((a, b) => {
+    if (mode === 'size') return b.totalBytes - a.totalBytes || compareNaturalName(a.name, b.name)
+    if (mode === 'mtime') {
+      return b.lastScannedAt - a.lastScannedAt || compareNaturalName(a.name, b.name)
+    }
     return compareNaturalName(a.name, b.name)
   })
   return copy

@@ -16,7 +16,7 @@ import { rpcCall, useActionQuery } from '@folio/base-contract/rpc'
 import { copyTextToClipboard } from '@folio/base-metadata-ui/client'
 import { useFolioTasks } from '@folio/base-tasks-ui/client'
 import { useProjectsExtensions } from './extension-registry.js'
-import { buildProjectMediaUrl } from './format.js'
+import { buildProjectMediaUrl, filterProjects, sortProjects } from './format.js'
 import type {
   AiExtractionOutput,
   AiStatusResult,
@@ -41,7 +41,18 @@ export interface ProjectsContextValue {
   readonly activeLibrary: LibraryRoot | null
   readonly projects: readonly ProjectSummary[]
   readonly filteredProjects: readonly ProjectSummary[]
+  readonly allProjects: readonly ProjectSummary[]
   readonly availableTags: readonly string[]
+  readonly overviewActive: boolean
+  readonly overviewShowAll: boolean
+  readonly overviewScopeProjects: readonly ProjectSummary[]
+  readonly overviewProjects: readonly ProjectSummary[]
+  readonly overviewAvailableTags: readonly string[]
+  readonly overviewSearchQuery: string
+  readonly overviewTagFilter: string | null
+  readonly overviewOnlyChanged: boolean
+  readonly overviewCardZoom: CardZoom
+  readonly overviewSortMode: SortMode
   readonly selectedProjectId: string | null
   readonly selectedProject: ProjectSummary | null
   readonly thumbnailRevision: string | undefined
@@ -71,8 +82,17 @@ export interface ProjectsContextValue {
   readonly extensionContext: ProjectsUiExtensionContext
   readonly lightbox: LightboxState
   setActiveLibraryId(libraryId: string): void
+  showAllProjects(): void
+  selectLibrary(libraryId: string): void
+  openProject(projectId: string): void
+  closeProject(): void
   selectProject(projectId: string | null): void
   selectFile(file: ProjectFileEntry | null): void
+  setOverviewSearchQuery(q: string): void
+  setOverviewTagFilter(tag: string | null): void
+  setOverviewOnlyChanged(only: boolean): void
+  setOverviewCardZoom(zoom: CardZoom): void
+  setOverviewSortMode(mode: SortMode): void
   setSearchQuery(q: string): void
   setTagFilter(tag: string | null): void
   setOnlyChanged(only: boolean): void
@@ -122,6 +142,7 @@ export interface ProjectsContextValue {
   toggleBatchMode(): void
   toggleProjectChecked(projectId: string): void
   selectAllFilteredProjects(): void
+  selectAllOverviewProjects(): void
   clearCheckedProjects(): void
   openFileContextMenu(file: ProjectFileEntry, clientX: number, clientY: number): void
   openProjectContextMenu(project: ProjectSummary, clientX: number, clientY: number): void
@@ -188,6 +209,12 @@ export function ProjectsProvider({
   const [aiApplyCover, setAiApplyCover] = React.useState(true)
   const [batchMode, setBatchMode] = React.useState(false)
   const [selectedProjectIds, setSelectedProjectIds] = React.useState<Set<string>>(() => new Set())
+  const [overviewShowAll, setOverviewShowAll] = React.useState(true)
+  const [overviewSearchQuery, setOverviewSearchQuery] = React.useState('')
+  const [overviewTagFilter, setOverviewTagFilter] = React.useState<string | null>(null)
+  const [overviewOnlyChanged, setOverviewOnlyChanged] = React.useState(false)
+  const [overviewCardZoom, setOverviewCardZoom] = React.useState<CardZoom>('md')
+  const [overviewSortMode, setOverviewSortMode] = React.useState<SortMode>('name')
 
   const {
     lightbox,
@@ -221,31 +248,75 @@ export function ProjectsProvider({
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [libraryProjects])
 
-  const filteredProjects = React.useMemo(() => {
-    const q = searchQuery.trim().toLowerCase()
-    return libraryProjects.filter(p => {
-      if (onlyChanged && !p.hasChanges) return false
-      if (tagFilter && !p.tags.includes(tagFilter)) return false
-      if (q) {
-        const hay = `${p.name} ${p.projectType} ${p.summary} ${p.tags.join(' ')}`.toLowerCase()
-        if (!hay.includes(q)) return false
-      }
-      return true
-    })
-  }, [libraryProjects, onlyChanged, tagFilter, searchQuery])
+  const filteredProjects = React.useMemo(
+    () => filterProjects(libraryProjects, searchQuery, tagFilter, onlyChanged),
+    [libraryProjects, onlyChanged, tagFilter, searchQuery],
+  )
 
-  // Auto-select first project in library when current selection disappears
+  const overviewScopeProjects = React.useMemo(
+    () => (overviewShowAll ? indexData.projects : libraryProjects),
+    [overviewShowAll, indexData.projects, libraryProjects],
+  )
+
+  const overviewAvailableTags = React.useMemo(() => {
+    const set = new Set<string>()
+    for (const p of overviewScopeProjects) {
+      for (const tag of p.tags) set.add(tag)
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [overviewScopeProjects])
+
+  const overviewProjects = React.useMemo(
+    () =>
+      sortProjects(
+        filterProjects(
+          overviewScopeProjects,
+          overviewSearchQuery,
+          overviewTagFilter,
+          overviewOnlyChanged,
+        ),
+        overviewSortMode,
+      ),
+    [
+      overviewScopeProjects,
+      overviewSearchQuery,
+      overviewTagFilter,
+      overviewOnlyChanged,
+      overviewSortMode,
+    ],
+  )
+
+  const showAllProjects = React.useCallback(() => {
+    setOverviewShowAll(true)
+  }, [])
+
+  const selectLibrary = React.useCallback((libraryId: string) => {
+    setActiveLibraryId(libraryId)
+    setOverviewShowAll(false)
+  }, [])
+
+  const openProject = React.useCallback(
+    (projectId: string) => {
+      const project = indexData.projects.find(p => p.id === projectId)
+      if (!project) return
+      setActiveLibraryId(project.libraryId)
+      setSelectedProjectId(projectId)
+    },
+    [indexData.projects],
+  )
+
+  const closeProject = React.useCallback(() => {
+    setSelectedProjectId(null)
+  }, [])
+
+  // Keep the open project valid without forcing one open: the library overview
+  // (project card grid) is the default surface.
   React.useEffect(() => {
-    if (libraryProjects.length === 0) {
+    if (!selectedProjectId) return
+    if (!indexData.projects.some(p => p.id === selectedProjectId)) {
       setSelectedProjectId(null)
-      setProjectManifest(null)
-      setSelectedFile(null)
-      return
     }
-    if (!selectedProjectId || !libraryProjects.some(p => p.id === selectedProjectId)) {
-      setSelectedProjectId(libraryProjects[0]!.id)
-    }
-  }, [libraryProjects, selectedProjectId])
+  }, [indexData.projects, selectedProjectId])
 
   const selectedProject = React.useMemo(
     () => indexData.projects.find(p => p.id === selectedProjectId) ?? null,
@@ -323,6 +394,7 @@ export function ProjectsProvider({
           { rootPath, name },
         )
         setActiveLibraryId(res.library.id)
+        setOverviewShowAll(false)
         trackTask(res.task)
         await indexQuery.refetch()
         notify(`已添加项目库「${res.library.name}」，后台扫描中…`)
@@ -676,6 +748,10 @@ export function ProjectsProvider({
     setSelectedProjectIds(new Set(filteredProjects.map(p => p.id)))
   }, [filteredProjects])
 
+  const selectAllOverviewProjects = React.useCallback(() => {
+    setSelectedProjectIds(new Set(overviewProjects.map(p => p.id)))
+  }, [overviewProjects])
+
   const clearCheckedProjects = React.useCallback(() => {
     setSelectedProjectIds(new Set())
   }, [])
@@ -917,7 +993,18 @@ export function ProjectsProvider({
     activeLibrary,
     projects: libraryProjects,
     filteredProjects,
+    allProjects: indexData.projects,
     availableTags,
+    overviewActive: selectedProjectId === null,
+    overviewShowAll,
+    overviewScopeProjects,
+    overviewProjects,
+    overviewAvailableTags,
+    overviewSearchQuery,
+    overviewTagFilter,
+    overviewOnlyChanged,
+    overviewCardZoom,
+    overviewSortMode,
     selectedProjectId,
     selectedProject,
     thumbnailRevision,
@@ -947,8 +1034,17 @@ export function ProjectsProvider({
     extensionContext,
     lightbox,
     setActiveLibraryId,
+    showAllProjects,
+    selectLibrary,
+    openProject,
+    closeProject,
     selectProject: setSelectedProjectId,
     selectFile: setSelectedFile,
+    setOverviewSearchQuery,
+    setOverviewTagFilter,
+    setOverviewOnlyChanged,
+    setOverviewCardZoom,
+    setOverviewSortMode,
     setSearchQuery,
     setTagFilter,
     setOnlyChanged,
@@ -980,6 +1076,7 @@ export function ProjectsProvider({
     toggleBatchMode,
     toggleProjectChecked,
     selectAllFilteredProjects,
+    selectAllOverviewProjects,
     clearCheckedProjects,
     openFileContextMenu,
     openProjectContextMenu,

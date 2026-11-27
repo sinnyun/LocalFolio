@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FrameController } from '@folio/base-contract'
 import { ProjectsInspector } from '../../../workspace-projects-ui/src/components/ProjectsInspector.js'
 import { ProjectsMain } from '../../../workspace-projects-ui/src/components/ProjectsMain.js'
-import { ProjectsSidebar } from '../../../workspace-projects-ui/src/components/ProjectsSidebar.js'
 import { ProjectsProvider } from '../../../workspace-projects-ui/src/context.js'
 import { createFolioProjectsUiService } from '../../../workspace-projects-ui/src/extension-registry.js'
 import type {
@@ -308,7 +307,7 @@ describe('@folio/feature-archive-ui', () => {
     service.registerExtension(createArchiveProjectsExtension())
     render(
       <ProjectsProvider appId="projects.library" frame={mockFrame} projectsUiService={service}>
-        <ProjectsSidebar appId="projects.library" frame={mockFrame} />
+        <ProjectsMain appId="projects.library" frame={mockFrame} />
       </ProjectsProvider>,
     )
 
@@ -333,13 +332,20 @@ describe('@folio/feature-archive-ui', () => {
     const service = createFolioProjectsUiService()
     const dispose = service.registerExtension(createArchiveProjectsExtension())
 
-    render(
+    const { container } = render(
       <ProjectsProvider appId="projects.library" frame={mockFrame} projectsUiService={service}>
         <div className="flex h-[720px] w-[1200px]">
           <ProjectsMain appId="projects.library" frame={mockFrame} />
           <ProjectsInspector appId="projects.library" frame={mockFrame} />
         </div>
       </ProjectsProvider>,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-lf-project-card="prj_arch"]')).toBeTruthy()
+    })
+    fireEvent.click(
+      container.querySelector('[data-lf-project-card="prj_arch"]') as HTMLButtonElement,
     )
 
     await waitFor(() => {
@@ -500,10 +506,18 @@ describe('@folio/feature-archive-ui', () => {
     const service = createFolioProjectsUiService()
     const dispose = service.registerExtension(createArchiveProjectsExtension())
 
-    render(
+    const { container } = render(
       <ProjectsProvider appId="projects.library" frame={mockFrame} projectsUiService={service}>
+        <ProjectsMain appId="projects.library" frame={mockFrame} />
         <ProjectsInspector appId="projects.library" frame={mockFrame} />
       </ProjectsProvider>,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-lf-project-card="prj_arch"]')).toBeTruthy()
+    })
+    fireEvent.click(
+      container.querySelector('[data-lf-project-card="prj_arch"]') as HTMLButtonElement,
     )
 
     await waitFor(() => {

@@ -13,6 +13,8 @@
 # `desktop` profile 由 Electron 应用独占，CLI 会拒绝（"managed exclusively by the
 # Electron application"）；桌面版请在应用内的插件管理里添加依赖：
 #   link:F:\AI\geren\LocalFolio\bundles\workbench-suite
+#
+# 构建、挂载与启动报错的排查见 docs/local-development.md。
 
 param(
   [ValidateSet('install', 'restart', 'url', 'stop', 'verify', 'all')]

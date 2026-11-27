@@ -3,7 +3,7 @@
   "version": "0.3.0-alpha.0",
   "private": true,
   "type": "module",
-  "description": "LocalFolio Project Library workspace built on @folio/base-frame-ui: virtualized project sidebar, collapsible folder-grouped virtual card grid, lazy dual-size thumbnails, change sync, and live SSE task progress bar.",
+  "description": "LocalFolio Project Library workspace built on @folio/base-frame-ui: project card overview with library list sidebar, per-project virtualized project list, collapsible folder-grouped virtual card grid, lazy dual-size thumbnails, change sync, and live SSE task progress bar.",
   "main": "./lib/index.js",
   "exports": {
     ".": "./lib/index.js",

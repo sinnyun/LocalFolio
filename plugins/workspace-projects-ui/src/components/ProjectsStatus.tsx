@@ -7,8 +7,9 @@ import { formatBytes } from '../format.js'
 export function ProjectsStatus(_props: FrameViewProps): React.ReactElement {
   const {
     libraries,
-    projects,
+    allProjects,
     selectedProject,
+    overviewActive,
     tasks,
     activeTask,
     recentFinishedTask,
@@ -24,7 +25,7 @@ export function ProjectsStatus(_props: FrameViewProps): React.ReactElement {
       <span className="opacity-40">·</span>
       <span className="tabular-nums">{libraries.length} 个库</span>
       <span className="opacity-40">·</span>
-      <span className="tabular-nums">{projects.length} 个项目</span>
+      <span className="tabular-nums">{allProjects.length} 个项目</span>
       {selectedProject ? (
         <>
           <span className="opacity-40">·</span>
@@ -32,6 +33,11 @@ export function ProjectsStatus(_props: FrameViewProps): React.ReactElement {
             {selectedProject.name}（{selectedProject.fileCount} 项 ·{' '}
             {formatBytes(selectedProject.totalBytes)}）
           </span>
+        </>
+      ) : overviewActive ? (
+        <>
+          <span className="opacity-40">·</span>
+          <span className="text-muted-foreground">项目卡片视图</span>
         </>
       ) : null}
     </>

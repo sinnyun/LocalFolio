@@ -503,7 +503,7 @@ export function createDefaultPluginManifest(): PluginManifest {
         category: 'workspace',
         slots: [],
         services: ['folioProjects'],
-        description: '基于四区布局框架的高性能归档项目库：虚拟滚动项目列表、可折叠文件夹分组虚拟卡片网格、按需缩略图与实时任务进度条。',
+        description: '基于四区布局框架的高性能归档项目库：项目卡片总览与库列表、进入项目后的项目列表与可折叠分组卡片网格、按需缩略图与实时任务进度条。',
         enabled: true,
         dependsOn: [
           '@folio/base-ui-kit',

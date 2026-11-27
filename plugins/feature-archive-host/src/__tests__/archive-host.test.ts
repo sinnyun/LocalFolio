@@ -14,6 +14,7 @@ import type {
   ProjectDetailResult,
 } from '../../../workspace-projects-host/src/types.js'
 import type { ArchiveCliRunner } from '../archive-service.js'
+import { isZpaqfranzVersionAtLeast, pickBestWindowsAsset } from '../archive-tool.js'
 import { registerFeatureArchiveHost } from '../host.js'
 import type { ArchiveToolStatus } from '../types.js'
 
@@ -593,5 +594,244 @@ describe('@folio/feature-archive-host', () => {
     thumbs.dispose()
     tasksHost.dispose()
     runtime.dispose()
+  })
+
+  it('packs using backup-chunk multi-volume layout, ignores all volume artifacts in scanner, supports export/recover/mount/unmount and cleans all volumes on restore', async () => {
+    const dataDir = await makeTempDir()
+    const libRoot = await makeTempDir()
+    const exportDir = await makeTempDir()
+    const fakeToolDir = await makeTempDir()
+
+    const fakeExe = path.join(fakeToolDir, 'zpaqfranz-full.exe')
+    await fsp.writeFile(fakeExe, Buffer.concat([Buffer.from([0x4d, 0x5a]), Buffer.alloc(50 * 1024)]))
+
+    const projDir = path.join(libRoot, 'Chunked Project')
+    await fsp.mkdir(path.join(projDir, 'scenes'), { recursive: true })
+    await fsp.writeFile(path.join(projDir, 'scenes', 'shot01.txt'), 'scene-01-data')
+    await fsp.writeFile(path.join(projDir, 'readme.md'), '# Chunked Archive Test')
+
+    const nativeCalls = { opened: [] as string[], revealed: [] as string[], recycled: [] as string[] }
+    const native = createMockNative(nativeCalls)
+    const storage = createFolioStorageService({ dataDir })
+    const runtime = createFolioRuntimeService({
+      storage,
+      admit: () => true,
+      trustedOrigins: [],
+    })
+    const tasksHost = registerBaseTasksHost({ runtime })
+    const thumbs = createFolioThumbsService({ native, tasks: tasksHost.service })
+    const projectsHost = createWorkspaceProjectsHost({
+      runtime,
+      storage,
+      tasks: tasksHost.service,
+      native,
+      thumbs,
+      workerPath: null,
+    })
+
+    const observedAddCalls: Array<{
+      layout?: string
+      chunkSizeGb?: number
+      compressionMethod?: string
+    }> = []
+    const observedExtractAllCalls: Array<{ sequential?: boolean; recover?: boolean }> = []
+    let unmountedCount = 0
+    const bundles = new Map<string, Record<string, string>>()
+
+    const chunkRunner: ArchiveCliRunner = {
+      async add({ projectPath, archiveFileName, entries, layout, chunkSizeGb, compressionMethod }) {
+        observedAddCalls.push({ layout, chunkSizeGb, compressionMethod })
+        const stem = archiveFileName.replace(/\.zpaq$/i, '')
+        const map: Record<string, string> = { ...(bundles.get(path.join(projectPath, archiveFileName)) ?? {}) }
+        const walk = async (dir: string): Promise<void> => {
+          const items = await fsp.readdir(dir, { withFileTypes: true })
+          for (const item of items) {
+            const full = path.join(dir, item.name)
+            const rel = path.relative(projectPath, full).split(path.sep).join('/')
+            if (!entries.includes(rel.split('/')[0]!) && !entries.includes(rel)) continue
+            if (item.isDirectory()) await walk(full)
+            else if (item.isFile()) map[rel] = (await fsp.readFile(full)).toString('base64')
+          }
+        }
+        await walk(projectPath)
+        bundles.set(path.join(projectPath, archiveFileName), map)
+        // Simulate zpaqfranz backup -chunk creating 2 numbered volumes + index + _backup.txt
+        await fsp.writeFile(path.join(projectPath, `${stem}_00000001.zpaq`), 'vol1-bytes', 'utf8')
+        await fsp.writeFile(path.join(projectPath, `${stem}_00000002.zpaq`), 'vol2-bytes-longer', 'utf8')
+        await fsp.writeFile(path.join(projectPath, `${stem}_index.zpaq`), 'idx', 'utf8')
+        await fsp.writeFile(path.join(projectPath, `${stem}_backup.txt`), 'hashes\n', 'utf8')
+      },
+      async test() {},
+      async extractFile({ archiveAbsPath, relPath, destFilePath }) {
+        const raw = bundles.get(archiveAbsPath)
+        if (!raw?.[relPath]) throw new Error(`missing ${relPath}`)
+        await fsp.mkdir(path.dirname(destFilePath), { recursive: true })
+        await fsp.writeFile(destFilePath, Buffer.from(raw[relPath]!, 'base64'))
+      },
+      async extractAll({ projectPath, archiveFileName, sequential, recover }) {
+        observedExtractAllCalls.push({ sequential, recover })
+        const raw = bundles.get(path.join(projectPath, archiveFileName)) ?? {}
+        for (const [relPath, b64] of Object.entries(raw)) {
+          const target = path.join(projectPath, ...relPath.split('/'))
+          await fsp.mkdir(path.dirname(target), { recursive: true })
+          await fsp.writeFile(target, Buffer.from(b64, 'base64'))
+        }
+      },
+      async mount({ allVersions }) {
+        let resolveExit: () => void = () => {}
+        const onExit = new Promise<void>(res => {
+          resolveExit = res
+        })
+        return {
+          mountPoint: allVersions ? 'Y:\\' : 'Z:\\',
+          pid: 4242,
+          onExit,
+          async unmount() {
+            unmountedCount += 1
+            resolveExit()
+          },
+        }
+      },
+    }
+
+    const archiveHost = registerFeatureArchiveHost({
+      runtime,
+      storage,
+      tasks: tasksHost.service,
+      native,
+      projectsHost: projectsHost.service,
+      runner: chunkRunner,
+    })
+
+    await runtime.executeAction('archive.tool.pickLocal', { filePath: fakeExe })
+    const updatedStatus = await runtime.executeAction<ArchiveToolStatus>('archive.settings.update', {
+      chunkSizeGb: 4,
+      compressionMethod: 'm9',
+      useSequentialExtract: true,
+    })
+    expect(updatedStatus.settings.chunkSizeGb).toBe(4)
+    expect(updatedStatus.settings.compressionMethod).toBe('m9')
+    expect(updatedStatus.settings.useSequentialExtract).toBe(true)
+
+    await runtime.executeAction('projects.libraries.add', { rootPath: libRoot, name: 'ChunkLib' })
+    await waitForTasksDone(runtime, 'projects')
+    const libIndex = await runtime.executeAction<LibraryIndex>('projects.libraries.list', {})
+    const project = libIndex.projects[0]!
+
+    // 1. Pack as backup-chunk
+    await runtime.executeAction('archive.project.pack', {
+      projectId: project.id,
+      sourceDisposal: 'recycle',
+    })
+    await waitForTasksDone(runtime, 'projects')
+
+    expect(observedAddCalls[0]).toEqual({
+      layout: 'backup-chunk',
+      chunkSizeGb: 4,
+      compressionMethod: 'm9',
+    })
+
+    const detail = await runtime.executeAction<ProjectDetailResult>('projects.detail.get', {
+      projectId: project.id,
+    })
+    expect(detail.manifest.archive?.archiveLayout).toBe('backup-chunk')
+    expect(detail.manifest.archive?.chunkSizeGb).toBe(4)
+    expect(detail.manifest.archive?.volumeCount).toBe(2)
+    expect(detail.manifest.archive?.compressionMethod).toBe('m9')
+    // Total bytes = 10 + 17 + 3 + 7 = 37
+    expect(detail.manifest.archive?.archiveBytes).toBe(37)
+
+    // 2. Scanner must ignore all 4 backup-chunk artifacts (_00000001.zpaq, _00000002.zpaq, _index.zpaq, _backup.txt)
+    const checkAfterPack = await runtime.executeAction<ProjectCheckResult>('projects.checkChanges', {
+      projectId: project.id,
+    })
+    expect(checkAfterPack.missing).toBe(false)
+    expect(checkAfterPack.hasChanges).toBe(false)
+
+    // 3. Multi-volume export copies all 4 artifacts
+    const exported = await runtime.executeAction<{
+      cancelled: boolean
+      exportedPath: string
+      exportedFiles: string[]
+    }>('archive.project.exportArchive', {
+      projectId: project.id,
+      destDir: exportDir,
+      reveal: false,
+    })
+    expect(exported.cancelled).toBe(false)
+    expect(exported.exportedFiles.length).toBe(4)
+
+    // 4. Mount (-all) and unmount virtual drive
+    const mountRes = await runtime.executeAction<{
+      mount: { mountPoint: string | null; allVersions: boolean }
+      alreadyMounted: boolean
+    }>('archive.project.mount', {
+      projectId: project.id,
+      allVersions: true,
+      openInExplorer: true,
+    })
+    expect(mountRes.alreadyMounted).toBe(false)
+    expect(mountRes.mount.mountPoint).toBe('Y:\\')
+    expect(mountRes.mount.allVersions).toBe(true)
+    expect(nativeCalls.opened).toContain('Y:\\')
+
+    const statusWhileMounted = await runtime.executeAction<ArchiveToolStatus>('archive.tool.status', {})
+    expect(statusWhileMounted.activeMounts).toHaveLength(1)
+    expect(statusWhileMounted.activeMounts[0]?.mountPoint).toBe('Y:\\')
+
+    const unmountRes = await runtime.executeAction<{ unmounted: boolean }>('archive.project.unmount', {
+      projectId: project.id,
+    })
+    expect(unmountRes.unmounted).toBe(true)
+    expect(unmountedCount).toBe(1)
+
+    // 5. Recover mode uses x -recover and keeps archive intact
+    await runtime.executeAction('archive.project.restore', {
+      projectId: project.id,
+      mode: 'recover_keep_archive',
+      recover: true,
+    })
+    await waitForTasksDone(runtime, 'projects')
+    expect(observedExtractAllCalls[0]).toEqual({ sequential: true, recover: true })
+    await expect(fsp.stat(path.join(projDir, 'scenes', 'shot01.txt'))).resolves.toBeTruthy()
+    await expect(fsp.stat(path.join(projDir, 'Chunked Project_00000001.zpaq'))).resolves.toBeTruthy()
+
+    // 6. Full restore (remove archive) uses sequential xx and recycles all 4 volume/index/txt files
+    await runtime.executeAction('archive.project.restore', {
+      projectId: project.id,
+      mode: 'restore_and_remove_archive',
+      removeArchive: true,
+    })
+    await waitForTasksDone(runtime, 'projects')
+    expect(observedExtractAllCalls[1]).toEqual({ sequential: true, recover: false })
+    await expect(fsp.stat(path.join(projDir, 'Chunked Project_00000001.zpaq'))).rejects.toThrow()
+    await expect(fsp.stat(path.join(projDir, 'Chunked Project_00000002.zpaq'))).rejects.toThrow()
+    await expect(fsp.stat(path.join(projDir, 'Chunked Project_index.zpaq'))).rejects.toThrow()
+    await expect(fsp.stat(path.join(projDir, 'Chunked Project_backup.txt'))).rejects.toThrow()
+
+    archiveHost.dispose()
+    projectsHost.dispose()
+    thumbs.dispose()
+    tasksHost.dispose()
+    runtime.dispose()
+  })
+
+  it('prefers zpaqfranz-full.exe in release picker and validates minimum version 65.11', () => {
+    const picked = pickBestWindowsAsset([
+      {
+        tag_name: '65.22',
+        assets: [
+          { name: 'zpaqfranz.exe', browser_download_url: 'https://example.com/zpaqfranz.exe' },
+          { name: 'zpaqfranz-full.exe', browser_download_url: 'https://example.com/zpaqfranz-full.exe' },
+          { name: 'zpaqfranz64.exe', browser_download_url: 'https://example.com/zpaqfranz64.exe' },
+        ],
+      },
+    ])
+    expect(picked?.asset.name).toBe('zpaqfranz-full.exe')
+    expect(isZpaqfranzVersionAtLeast('65.10', 65, 11)).toBe(false)
+    expect(isZpaqfranzVersionAtLeast('65.11', 65, 11)).toBe(true)
+    expect(isZpaqfranzVersionAtLeast('65.22o', 65, 11)).toBe(true)
+    expect(isZpaqfranzVersionAtLeast('installed', 65, 11)).toBe(true)
+    expect(isZpaqfranzVersionAtLeast(null, 65, 11)).toBe(false)
   })
 })

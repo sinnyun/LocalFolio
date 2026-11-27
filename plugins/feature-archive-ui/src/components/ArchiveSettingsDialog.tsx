@@ -34,7 +34,9 @@ import {
   updateArchiveSettings,
   useArchiveUiStore,
 } from '../archive-store.js'
-import type { ArchiveSourceDisposal } from '../types.js'
+import type { ArchiveCompressionMethod, ArchiveSourceDisposal } from '../types.js'
+
+const CHUNK_PRESETS_GB = [2, 4, 8, 16] as const
 
 export interface ArchiveSettingsDialogProps {
   readonly ctx: ProjectsUiExtensionContext
@@ -47,6 +49,10 @@ export function ArchiveSettingsDialog({ ctx }: ArchiveSettingsDialogProps): Reac
   const [disposal, setDisposal] = React.useState<ArchiveSourceDisposal>('recycle')
   const [cacheMbText, setCacheMbText] = React.useState('512')
   const [hideMetaDir, setHideMetaDir] = React.useState(true)
+  const [chunkSizeGbText, setChunkSizeGbText] = React.useState('8')
+  const [compressionMethod, setCompressionMethod] =
+    React.useState<ArchiveCompressionMethod>('default')
+  const [useSequentialExtract, setUseSequentialExtract] = React.useState(true)
 
   React.useEffect(() => {
     if (!status?.settings) return
@@ -54,6 +60,9 @@ export function ArchiveSettingsDialog({ ctx }: ArchiveSettingsDialogProps): Reac
     setDisposal(status.settings.defaultSourceDisposal)
     setCacheMbText(String(status.settings.extractCacheMaxMb))
     setHideMetaDir(status.settings.hideMetaDir)
+    setChunkSizeGbText(String(status.settings.chunkSizeGb ?? 8))
+    setCompressionMethod(status.settings.compressionMethod ?? 'default')
+    setUseSequentialExtract(status.settings.useSequentialExtract ?? true)
   }, [status?.settings])
 
   const handleDownload = async (): Promise<void> => {
@@ -80,12 +89,16 @@ export function ArchiveSettingsDialog({ ctx }: ArchiveSettingsDialogProps): Reac
 
   const handleSave = async (): Promise<void> => {
     const parsedMb = Math.min(16384, Math.max(64, Number(cacheMbText) || 512))
+    const parsedChunkGb = Math.min(1024, Math.max(0.25, Number(chunkSizeGbText) || 8))
     try {
       await updateArchiveSettings({
         mirrorPrefix: mirrorPrefix.trim(),
         defaultSourceDisposal: disposal,
         extractCacheMaxMb: parsedMb,
         hideMetaDir,
+        chunkSizeGb: parsedChunkGb,
+        compressionMethod,
+        useSequentialExtract,
       })
       ctx.notify('已保存归档引擎设置', true)
       setArchiveDialogOpen(false)
@@ -109,7 +122,7 @@ export function ArchiveSettingsDialog({ ctx }: ArchiveSettingsDialogProps): Reac
         <DialogHeader>
           <DialogTitle>ZPAQ 归档引擎与工具管理</DialogTitle>
           <DialogDescription>
-            内置托管 zpaqfranz 引擎到独立固定目录。查看缩略图无需解压；打开或导出归档内文件时自动按需单文件提取，无需切换外部解压软件。
+            优先托管 zpaqfranz-full.exe（支持固定大小分卷、虚拟盘挂载与跨卷去重）。查看缩略图无需解压；打开或导出归档内文件时自动按需单文件提取。
           </DialogDescription>
         </DialogHeader>
 
@@ -129,6 +142,12 @@ export function ArchiveSettingsDialog({ ctx }: ArchiveSettingsDialogProps): Reac
                 </Badge>
               )}
             </div>
+
+            {status?.installed && status.supportsChunkBackup === false ? (
+              <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+                当前版本低于 65.11，不支持 backup -chunk 固定大小分卷，请点击下方按钮更新到最新版。
+              </div>
+            ) : null}
 
             <div className="flex flex-col gap-1">
               <span className="text-[11px] text-muted-foreground">固定托管目录</span>
@@ -201,6 +220,65 @@ export function ArchiveSettingsDialog({ ctx }: ArchiveSettingsDialogProps): Reac
           <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
             <div className="flex items-center justify-between gap-2">
               <div className="flex flex-col">
+                <span className="font-medium">固定分卷大小上限（GB）</span>
+                <span className="text-[11px] text-muted-foreground">
+                  新归档采用 backup -chunk 自动切分，保留全局跨卷去重与断电保护
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                {CHUNK_PRESETS_GB.map(gb => (
+                  <Button
+                    key={gb}
+                    type="button"
+                    size="sm"
+                    variant={Number(chunkSizeGbText) === gb ? 'secondary' : 'ghost'}
+                    className="h-6 px-1.5 text-[11px] tabular-nums"
+                    onClick={() => setChunkSizeGbText(String(gb))}
+                  >
+                    {gb}G
+                  </Button>
+                ))}
+                <Input
+                  type="number"
+                  min={0.25}
+                  max={1024}
+                  step={0.5}
+                  aria-label="分卷大小上限（GB）"
+                  value={chunkSizeGbText}
+                  onChange={e => setChunkSizeGbText(e.target.value)}
+                  className="h-7 w-16 text-xs tabular-nums"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-col">
+                <span className="font-medium">压缩等级（Zstd）</span>
+                <span className="text-[11px] text-muted-foreground">
+                  {compressionMethod === 'm7'
+                    ? '-m7：冷归档高压缩（64MB 块，压缩时约占 3GB 内存，解压极快）'
+                    : compressionMethod === 'm9'
+                      ? '-m9：较高压缩率，比默认略慢但体积更小、解压同样极快'
+                      : '默认（-m8/-m8l）：日常高频归档甜点，压缩与解压均极快'}
+                </span>
+              </div>
+              <Select
+                value={compressionMethod}
+                onValueChange={v => setCompressionMethod(v as ArchiveCompressionMethod)}
+              >
+                <SelectTrigger className="h-7 w-40 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">默认平衡（推荐）</SelectItem>
+                  <SelectItem value="m9">较高压缩（-m9）</SelectItem>
+                  <SelectItem value="m7">冷归档高压缩（-m7）</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-col">
                 <span className="font-medium">归档后源文件处理方式</span>
                 <span className="text-[11px] text-muted-foreground">
                   仅在 zpaqfranz 完整性校验 100% 通过后执行
@@ -220,6 +298,21 @@ export function ArchiveSettingsDialog({ ctx }: ArchiveSettingsDialogProps): Reac
                 </SelectContent>
               </Select>
             </div>
+
+            <label className="flex cursor-pointer items-center justify-between gap-2 select-none">
+              <div className="flex flex-col">
+                <span className="font-medium">整包还原使用顺序写入（xx）</span>
+                <span className="text-[11px] text-muted-foreground">
+                  显著提升机械硬盘（HDD）解包速度并减少磁盘碎片
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={useSequentialExtract}
+                onChange={e => setUseSequentialExtract(e.target.checked)}
+                className="h-3.5 w-3.5 accent-primary"
+              />
+            </label>
 
             <label className="flex cursor-pointer items-center justify-between gap-2 select-none">
               <div className="flex flex-col">

@@ -1,12 +1,41 @@
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { FolioError, type FolioNativeService } from '@folio/base-contract'
+import {
+  FolioError,
+  getProjectArchiveStem,
+  isProjectArchiveArtifactName,
+  isProjectArchiveVolumeFileName,
+  type FolioNativeService,
+  type ProjectArchiveCompressionMethod,
+  type ProjectArchiveLayout,
+} from '@folio/base-contract'
 import type { ArchiveToolManager } from './archive-tool.js'
 import type { ArchiveSourceDisposal } from './types.js'
 
 const META_DIR_NAME = '.folio-meta'
+
+export interface MountedArchiveHandle {
+  readonly mountPoint: string | null
+  readonly pid: number | null
+  readonly onExit: Promise<void>
+  unmount(): Promise<void>
+}
+
+export interface ArchiveArtifactFile {
+  readonly name: string
+  readonly absPath: string
+  readonly size: number
+}
+
+export interface ArchiveArtifactSet {
+  readonly allFiles: readonly ArchiveArtifactFile[]
+  readonly volumeFiles: readonly ArchiveArtifactFile[]
+  readonly transientFiles: readonly ArchiveArtifactFile[]
+  readonly totalBytes: number
+  readonly primaryRevealPath: string | null
+}
 
 export interface ArchiveCliRunner {
   add(options: {
@@ -14,6 +43,9 @@ export interface ArchiveCliRunner {
     readonly projectPath: string
     readonly archiveFileName: string
     readonly entries: readonly string[]
+    readonly layout?: ProjectArchiveLayout
+    readonly chunkSizeGb?: number
+    readonly compressionMethod?: ProjectArchiveCompressionMethod
     readonly signal?: AbortSignal
     readonly onProgress?: (percent: number | null, detail: string) => void
   }): Promise<void>
@@ -35,9 +67,18 @@ export interface ArchiveCliRunner {
     readonly binaryPath: string
     readonly projectPath: string
     readonly archiveFileName: string
+    readonly sequential?: boolean
+    readonly recover?: boolean
     readonly signal?: AbortSignal
     readonly onProgress?: (percent: number | null, detail: string) => void
   }): Promise<void>
+  mount?(options: {
+    readonly binaryPath: string
+    readonly projectPath: string
+    readonly archiveAbsPath: string
+    readonly allVersions?: boolean
+    readonly driveLetter?: string
+  }): Promise<MountedArchiveHandle>
 }
 
 export function sanitizeArchiveSegment(name: string): string {
@@ -52,6 +93,23 @@ export function buildDefaultArchiveFileName(projectName: string): string {
   return `${sanitizeArchiveSegment(projectName)}.zpaq`
 }
 
+export function formatChunkSizeArg(chunkSizeGb: number): string {
+  const clamped = Number.isFinite(chunkSizeGb) ? Math.min(1024, Math.max(0.25, chunkSizeGb)) : 8
+  if (Number.isInteger(clamped)) {
+    return `${clamped}GB`
+  }
+  const mb = Math.max(256, Math.round(clamped * 1024))
+  return `${mb}MB`
+}
+
+export function compressionMethodToArg(
+  method?: ProjectArchiveCompressionMethod,
+): string | null {
+  if (method === 'm9') return '-m9'
+  if (method === 'm7') return '-m7'
+  return null
+}
+
 function normalizePath(raw: string): string {
   const trimmed = raw.trim()
   if (!trimmed || trimmed.includes('\0')) return ''
@@ -60,6 +118,50 @@ function normalizePath(raw: string): string {
     return `${resolved[0]!.toUpperCase()}${resolved.slice(1)}`
   }
   return resolved
+}
+
+export async function listArchiveArtifacts(
+  projectPath: string,
+  archiveFileName: string,
+): Promise<ArchiveArtifactSet> {
+  const entries = await fsp.readdir(projectPath, { withFileTypes: true }).catch(() => [])
+  const allFiles: ArchiveArtifactFile[] = []
+  const volumeFiles: ArchiveArtifactFile[] = []
+  const transientFiles: ArchiveArtifactFile[] = []
+
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    if (!isProjectArchiveArtifactName(entry.name, archiveFileName)) continue
+    const absPath = normalizePath(path.join(projectPath, entry.name))
+    const st = await fsp.stat(absPath).catch(() => null)
+    if (!st?.isFile()) continue
+    const item: ArchiveArtifactFile = { name: entry.name, absPath, size: st.size }
+    const lower = entry.name.toLowerCase()
+    if (lower.endsWith('.tmp') || lower.endsWith('.spaz')) {
+      transientFiles.push(item)
+      continue
+    }
+    allFiles.push(item)
+    if (isProjectArchiveVolumeFileName(entry.name, archiveFileName)) {
+      volumeFiles.push(item)
+    }
+  }
+
+  const byName = (a: ArchiveArtifactFile, b: ArchiveArtifactFile) =>
+    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+  allFiles.sort(byName)
+  volumeFiles.sort(byName)
+  transientFiles.sort(byName)
+
+  const totalBytes = allFiles.reduce((acc, f) => acc + f.size, 0)
+  const primaryRevealPath = volumeFiles[0]?.absPath ?? allFiles[0]?.absPath ?? null
+  return {
+    allFiles,
+    volumeFiles,
+    transientFiles,
+    totalBytes,
+    primaryRevealPath,
+  }
 }
 
 function isPathInside(rootDir: string, candidatePath: string): boolean {
@@ -157,24 +259,68 @@ function runZpaqProcess(options: {
 
 export function createZpaqfranzRunner(): ArchiveCliRunner {
   return {
-    async add({ binaryPath, projectPath, archiveFileName, entries, signal, onProgress }) {
-      const args = [
-        'a',
-        archiveFileName,
-        ...entries,
-        '-not',
-        META_DIR_NAME,
-        '-not',
-        `${META_DIR_NAME}/*`,
-        '-not',
-        archiveFileName,
-        '-not',
-        '*.tmp',
-        '-not',
-        'Thumbs.db',
-        '-not',
-        'desktop.ini',
-      ]
+    async add({
+      binaryPath,
+      projectPath,
+      archiveFileName,
+      entries,
+      layout = 'backup-chunk',
+      chunkSizeGb = 8,
+      compressionMethod = 'default',
+      signal,
+      onProgress,
+    }) {
+      const stem = getProjectArchiveStem(archiveFileName)
+      const methodArg = compressionMethodToArg(compressionMethod)
+      const args: string[] =
+        layout === 'backup-chunk'
+          ? [
+              'backup',
+              archiveFileName,
+              ...entries,
+              '-chunk',
+              formatChunkSizeArg(chunkSizeGb),
+              ...(methodArg ? [methodArg] : []),
+              '-not',
+              META_DIR_NAME,
+              '-not',
+              `${META_DIR_NAME}/*`,
+              '-not',
+              archiveFileName,
+              '-not',
+              `${stem}_*.zpaq`,
+              '-not',
+              `${stem}_backup.txt`,
+              '-not',
+              '*.tmp',
+              '-not',
+              '*.spaz',
+              '-not',
+              'Thumbs.db',
+              '-not',
+              'desktop.ini',
+            ]
+          : [
+              'a',
+              archiveFileName,
+              ...entries,
+              ...(methodArg ? [methodArg] : []),
+              '-not',
+              META_DIR_NAME,
+              '-not',
+              `${META_DIR_NAME}/*`,
+              '-not',
+              archiveFileName,
+              '-not',
+              '*.tmp',
+              '-not',
+              '*.spaz',
+              '-not',
+              'Thumbs.db',
+              '-not',
+              'desktop.ini',
+            ]
+
       await runZpaqProcess({
         binaryPath,
         args,
@@ -244,15 +390,154 @@ export function createZpaqfranzRunner(): ArchiveCliRunner {
       }
     },
 
-    async extractAll({ binaryPath, projectPath, archiveFileName, signal, onProgress }) {
+    async extractAll({
+      binaryPath,
+      projectPath,
+      archiveFileName,
+      sequential = true,
+      recover = false,
+      signal,
+      onProgress,
+    }) {
+      const args = recover
+        ? ['x', archiveFileName, '-recover', '-force']
+        : [sequential ? 'xx' : 'x', archiveFileName, '-force']
+
       await runZpaqProcess({
         binaryPath,
-        args: ['x', archiveFileName, '-force'],
+        args,
         cwd: projectPath,
         signal,
         onOutput: (line, pct) => onProgress?.(pct, line),
-        errorCode: 'archive_restore_failed',
-        errorPrefix: 'zpaqfranz 解包还原失败',
+        errorCode: recover ? 'archive_recover_failed' : 'archive_restore_failed',
+        errorPrefix: recover ? 'zpaqfranz 坏包抢救失败' : 'zpaqfranz 解包还原失败',
+      })
+    },
+
+    async mount({ binaryPath, projectPath, archiveAbsPath, allVersions = false, driveLetter }) {
+      const normalizedDrive = driveLetter?.trim()
+      const args = [
+        'mount',
+        archiveAbsPath,
+        ...(normalizedDrive ? [normalizedDrive] : []),
+        ...(allVersions ? ['-all'] : []),
+      ]
+
+      return await new Promise<MountedArchiveHandle>((resolve, reject) => {
+        const child = spawn(binaryPath, args, {
+          cwd: projectPath,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+        })
+
+        let settled = false
+        let exited = false
+        let detectedMountPoint: string | null = normalizedDrive || null
+        let tailLines: string[] = []
+        let resolveExit: () => void = () => {}
+        const onExit = new Promise<void>(res => {
+          resolveExit = res
+        })
+
+        const buildHandle = (): MountedArchiveHandle => ({
+          mountPoint: detectedMountPoint,
+          pid: child.pid ?? null,
+          onExit,
+          async unmount() {
+            if (exited) return
+            try {
+              child.kill('SIGINT')
+            } catch {
+              // ignore
+            }
+            const timer = setTimeout(() => {
+              if (exited) return
+              try {
+                child.kill('SIGTERM')
+              } catch {
+                // ignore
+              }
+              if (process.platform === 'win32' && child.pid) {
+                execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], () => {})
+              }
+            }, 1500)
+            await Promise.race([
+              onExit,
+              new Promise<void>(res => setTimeout(res, 3500)),
+            ])
+            clearTimeout(timer)
+          },
+        })
+
+        const finishSuccess = (): void => {
+          if (settled) return
+          settled = true
+          clearTimeout(startupTimer)
+          resolve(buildHandle())
+        }
+
+        const startupTimer = setTimeout(() => {
+          finishSuccess()
+        }, 1800)
+
+        const handleText = (chunk: string): void => {
+          const lines = chunk.split(/\r?\n/)
+          for (const raw of lines) {
+            const line = raw.trim()
+            if (!line) continue
+            tailLines.push(line)
+            if (tailLines.length > 20) tailLines = tailLines.slice(-20)
+            const mountMatch =
+              /(?:mount(?:ed)?(?:\s+(?:on|at|to))?\s+|drive\s+)([D-Z]:\\?|\/[^\s]+)/i.exec(line) ??
+              /\b([D-Z]:\\)\b/.exec(line)
+            if (mountMatch?.[1]) {
+              detectedMountPoint = mountMatch[1].toUpperCase().endsWith(':')
+                ? `${mountMatch[1].toUpperCase()}\\`
+                : mountMatch[1]
+              finishSuccess()
+            }
+          }
+        }
+
+        child.stdout.setEncoding('utf8')
+        child.stderr.setEncoding('utf8')
+        child.stdout.on('data', handleText)
+        child.stderr.on('data', handleText)
+
+        child.on('error', err => {
+          exited = true
+          clearTimeout(startupTimer)
+          resolveExit()
+          if (settled) return
+          settled = true
+          reject(
+            new FolioError(
+              'archive_mount_failed',
+              `启动虚拟盘挂载失败: ${err.message}`,
+              500,
+            ),
+          )
+        })
+
+        child.on('close', code => {
+          exited = true
+          clearTimeout(startupTimer)
+          resolveExit()
+          if (settled) return
+          settled = true
+          const tail = tailLines.slice(-4).join(' | ')
+          const hint =
+            /winfsp|fuse|unknown command|not supported/i.test(tail)
+              ? '（请确认已更新为 zpaqfranz-full.exe 并已安装 WinFsp 驱动）'
+              : ''
+          reject(
+            new FolioError(
+              'archive_mount_failed',
+              `虚拟盘挂载失败 (exit=${code})${tail ? `: ${tail}` : ''}${hint}`,
+              500,
+            ),
+          )
+        })
       })
     },
   }
@@ -260,6 +545,7 @@ export function createZpaqfranzRunner(): ArchiveCliRunner {
 
 export interface ProjectArchiveService {
   readonly runner: ArchiveCliRunner
+  listArchiveArtifacts(projectPath: string, archiveFileName: string): Promise<ArchiveArtifactSet>
   collectTopLevelPackEntries(projectPath: string, archiveFileName: string): Promise<string[]>
   disposeSourceEntries(
     projectPath: string,
@@ -300,7 +586,10 @@ export interface ProjectArchiveService {
     readonly projectPath: string
     readonly archiveFileName: string
     readonly destDir: string
-  }): Promise<string>
+  }): Promise<{
+    readonly exportedPath: string
+    readonly exportedFiles: readonly string[]
+  }>
 }
 
 export function createProjectArchiveService(options: {
@@ -312,24 +601,35 @@ export function createProjectArchiveService(options: {
   const runner = options.runner ?? createZpaqfranzRunner()
   const inflightExtracts = new Map<string, Promise<string>>()
 
+  const ensureArchivePresent = async (
+    projectPath: string,
+    archiveFileName: string,
+  ): Promise<ArchiveArtifactSet> => {
+    const artifacts = await listArchiveArtifacts(projectPath, archiveFileName)
+    if (artifacts.volumeFiles.length === 0) {
+      throw new FolioError('archive_missing', `归档包不存在: ${archiveFileName}`, 404)
+    }
+    return artifacts
+  }
+
   const collectTopLevelPackEntries = async (
     projectPath: string,
     archiveFileName: string,
   ): Promise<string[]> => {
     const dirEntries = await fsp.readdir(projectPath, { withFileTypes: true })
-    const archiveLower = archiveFileName.toLowerCase()
     const entries: string[] = []
     for (const entry of dirEntries) {
       if (entry.isSymbolicLink()) continue
       const lower = entry.name.toLowerCase()
       if (lower === META_DIR_NAME.toLowerCase()) continue
-      if (lower === archiveLower) continue
+      if (isProjectArchiveArtifactName(entry.name, archiveFileName)) continue
       if (
         lower === 'thumbs.db' ||
         lower === 'desktop.ini' ||
         lower === '.ds_store' ||
         lower.startsWith('~$') ||
-        lower.endsWith('.tmp')
+        lower.endsWith('.tmp') ||
+        lower.endsWith('.spaz')
       ) {
         continue
       }
@@ -384,12 +684,8 @@ export function createProjectArchiveService(options: {
 
     const promise = (async () => {
       const binaryPath = await toolManager.requireActiveBinary()
+      await ensureArchivePresent(opts.projectPath, opts.archiveFileName)
       const archiveAbsPath = normalizePath(path.join(opts.projectPath, opts.archiveFileName))
-      try {
-        await fsp.access(archiveAbsPath)
-      } catch {
-        throw new FolioError('archive_missing', `归档包不存在: ${opts.archiveFileName}`, 404)
-      }
 
       const dir = path.dirname(cacheTarget)
       await fsp.mkdir(dir, { recursive: true })
@@ -436,10 +732,8 @@ export function createProjectArchiveService(options: {
     }
 
     const binaryPath = await toolManager.requireActiveBinary()
+    await ensureArchivePresent(opts.projectPath, opts.archiveFileName)
     const archiveAbsPath = normalizePath(path.join(opts.projectPath, opts.archiveFileName))
-    await fsp.access(archiveAbsPath).catch(() => {
-      throw new FolioError('archive_missing', `归档包不存在: ${opts.archiveFileName}`, 404)
-    })
 
     await runner.extractFile({
       binaryPath,
@@ -452,31 +746,34 @@ export function createProjectArchiveService(options: {
   }
 
   const exportArchiveToDestination: ProjectArchiveService['exportArchiveToDestination'] = async opts => {
-    const archiveAbsPath = normalizePath(path.join(opts.projectPath, opts.archiveFileName))
-    const srcStat = await fsp.stat(archiveAbsPath).catch(() => null)
-    if (!srcStat?.isFile()) {
-      throw new FolioError('archive_missing', `归档包不存在: ${opts.archiveFileName}`, 404)
-    }
-
+    const artifacts = await ensureArchivePresent(opts.projectPath, opts.archiveFileName)
     const normalizedDestDir = normalizePath(opts.destDir)
     if (!normalizedDestDir) {
       throw new FolioError('invalid_path', '导出目录路径无效', 400)
     }
 
     await fsp.mkdir(normalizedDestDir, { recursive: true })
-    const destPath = normalizePath(path.join(normalizedDestDir, path.basename(opts.archiveFileName)))
-    if (archiveAbsPath.toLowerCase() === destPath.toLowerCase()) {
-      return destPath
+    const exportedFiles: string[] = []
+
+    for (const file of artifacts.allFiles) {
+      const destPath = normalizePath(path.join(normalizedDestDir, path.basename(file.name)))
+      if (file.absPath.toLowerCase() === destPath.toLowerCase()) {
+        exportedFiles.push(destPath)
+        continue
+      }
+      const tmpDest = `${destPath}.${crypto.randomUUID().slice(0, 8)}.tmp`
+      try {
+        await fsp.copyFile(file.absPath, tmpDest)
+        await fsp.rename(tmpDest, destPath)
+        exportedFiles.push(destPath)
+      } catch (err) {
+        await fsp.unlink(tmpDest).catch(() => {})
+        throw err
+      }
     }
-    const tmpDest = `${destPath}.${crypto.randomUUID().slice(0, 8)}.tmp`
-    try {
-      await fsp.copyFile(archiveAbsPath, tmpDest)
-      await fsp.rename(tmpDest, destPath)
-    } catch (err) {
-      await fsp.unlink(tmpDest).catch(() => {})
-      throw err
-    }
-    return destPath
+
+    const exportedPath = exportedFiles[0] ?? normalizePath(path.join(normalizedDestDir, path.basename(opts.archiveFileName)))
+    return { exportedPath, exportedFiles }
   }
 
   const removeEmptyParentDirs = async (projectPath: string, startDir: string): Promise<void> => {
@@ -549,10 +846,8 @@ export function createProjectArchiveService(options: {
     }
 
     const binaryPath = await toolManager.requireActiveBinary()
+    await ensureArchivePresent(opts.projectPath, opts.archiveFileName)
     const archiveAbsPath = normalizePath(path.join(opts.projectPath, opts.archiveFileName))
-    await fsp.access(archiveAbsPath).catch(() => {
-      throw new FolioError('archive_missing', `归档包不存在: ${opts.archiveFileName}`, 404)
-    })
 
     const targetDir = path.dirname(targetPath)
     await fsp.mkdir(targetDir, { recursive: true })
@@ -581,6 +876,7 @@ export function createProjectArchiveService(options: {
 
   return {
     runner,
+    listArchiveArtifacts,
     collectTopLevelPackEntries,
     disposeSourceEntries,
     removeFilesAndPruneDirs,

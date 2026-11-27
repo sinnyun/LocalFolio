@@ -1,4 +1,5 @@
 export type ArchiveSourceDisposal = 'recycle' | 'keep' | 'delete'
+export type ArchiveCompressionMethod = 'default' | 'm9' | 'm7'
 
 export interface ArchiveSettings {
   readonly mirrorPrefix: string
@@ -6,6 +7,9 @@ export interface ArchiveSettings {
   readonly defaultSourceDisposal: ArchiveSourceDisposal
   readonly extractCacheMaxMb: number
   readonly hideMetaDir: boolean
+  readonly chunkSizeGb: number
+  readonly compressionMethod: ArchiveCompressionMethod
+  readonly useSequentialExtract: boolean
 }
 
 export interface ArchiveCacheStats {
@@ -14,15 +18,27 @@ export interface ArchiveCacheStats {
   readonly cacheDir: string
 }
 
+export interface ArchiveMountSessionInfo {
+  readonly projectId: string
+  readonly projectName: string
+  readonly archiveFileName: string
+  readonly mountPoint: string | null
+  readonly allVersions: boolean
+  readonly startedAt: number
+  readonly pid: number | null
+}
+
 export interface ArchiveToolStatus {
   readonly installed: boolean
   readonly source: 'managed' | 'custom' | 'none'
   readonly version: string | null
+  readonly supportsChunkBackup?: boolean
   readonly binaryPath: string | null
   readonly managedDir: string
   readonly managedBinaryPath: string
   readonly settings: ArchiveSettings
   readonly cacheStats: ArchiveCacheStats
+  readonly activeMounts?: readonly ArchiveMountSessionInfo[]
 }
 
 export interface ArchiveLiveFileItem {

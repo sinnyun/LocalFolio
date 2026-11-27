@@ -129,6 +129,39 @@ export async function clearArchiveCache(): Promise<void> {
   await refreshArchiveStatus()
 }
 
+export async function mountProjectArchive(options: {
+  readonly projectId: string
+  readonly allVersions?: boolean
+  readonly driveLetter?: string
+  readonly openInExplorer?: boolean
+}): Promise<{
+  readonly mount: {
+    readonly projectId: string
+    readonly mountPoint: string | null
+    readonly allVersions: boolean
+  }
+  readonly alreadyMounted: boolean
+}> {
+  const res = await rpcCall<{
+    readonly mount: {
+      readonly projectId: string
+      readonly mountPoint: string | null
+      readonly allVersions: boolean
+    }
+    readonly alreadyMounted: boolean
+  }>('archive.project.mount', options)
+  await refreshArchiveStatus()
+  return res
+}
+
+export async function unmountProjectArchive(projectId: string): Promise<{ readonly unmounted: boolean }> {
+  const res = await rpcCall<{ readonly unmounted: boolean }>('archive.project.unmount', {
+    projectId,
+  })
+  await refreshArchiveStatus()
+  return res
+}
+
 function ensureGlobalSyncListeners(): void {
   if (initialized || typeof window === 'undefined') return
   initialized = true

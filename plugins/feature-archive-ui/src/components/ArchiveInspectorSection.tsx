@@ -7,11 +7,15 @@ import {
   Download,
   ExternalLink,
   FilePlus2,
+  HardDrive,
+  History,
+  LifeBuoy,
   PackageOpen,
   Settings,
   ShieldCheck,
   Sparkles,
   Trash2,
+  Unplug,
   Upload,
 } from 'lucide-react'
 import { Badge, Button } from '@folio/base-ui-kit/client'
@@ -19,7 +23,9 @@ import {
   downloadZpaqfranz,
   formatBytes,
   formatDateTime,
+  mountProjectArchive,
   setArchiveDialogOpen,
+  unmountProjectArchive,
   useArchiveUiStore,
 } from '../archive-store.js'
 import type { ArchiveLiveInspection } from '../types.js'
@@ -36,6 +42,10 @@ export function ArchiveInspectorSection({
   const project = ctx.selectedProject
   const archive = ctx.projectArchive
   const isArchived = Boolean(project && (archive?.mode === 'archived' || project.archived))
+  const activeMount = React.useMemo(
+    () => (project ? status?.activeMounts?.find(m => m.projectId === project.id) ?? null : null),
+    [project?.id, status?.activeMounts],
+  )
 
   const refreshInspection = React.useCallback(async () => {
     if (!project) {
@@ -157,15 +167,56 @@ export function ArchiveInspectorSection({
 
   const handleExportArchive = async (): Promise<void> => {
     try {
-      const res = await rpcCall<{ cancelled: boolean; exportedPath: string | null }>(
-        'archive.project.exportArchive',
-        { projectId: project.id, reveal: true },
-      )
+      const res = await rpcCall<{
+        cancelled: boolean
+        exportedPath: string | null
+        exportedFiles?: readonly string[]
+      }>('archive.project.exportArchive', { projectId: project.id, reveal: true })
       if (!res.cancelled && res.exportedPath) {
-        ctx.notify(`已导出归档包到：${res.exportedPath}`, true)
+        const count = res.exportedFiles?.length ?? 1
+        ctx.notify(
+          count > 1
+            ? `已导出全套分卷归档（共 ${count} 个文件）到：${res.exportedPath}`
+            : `已导出归档包到：${res.exportedPath}`,
+          true,
+        )
       }
     } catch (err) {
       ctx.notify(err instanceof Error ? err.message : '导出归档包失败', false)
+    }
+  }
+
+  const handleMount = async (allVersions: boolean): Promise<void> => {
+    setBusy(true)
+    try {
+      const res = await mountProjectArchive({
+        projectId: project.id,
+        allVersions,
+        openInExplorer: true,
+      })
+      const target = res.mount.mountPoint ? `（${res.mount.mountPoint}）` : ''
+      ctx.notify(
+        allVersions
+          ? `已挂载全部历史版本只读虚拟盘${target}`
+          : `已挂载归档只读虚拟盘${target}`,
+        true,
+      )
+    } catch (err) {
+      ctx.notify(err instanceof Error ? err.message : '挂载虚拟盘失败', false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleUnmount = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      await unmountProjectArchive(project.id)
+      ctx.notify('已卸载只读虚拟盘', true)
+    } catch (err) {
+      ctx.notify(err instanceof Error ? err.message : '卸载虚拟盘失败', false)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -220,7 +271,8 @@ export function ArchiveInspectorSection({
           <div className="flex items-center justify-between gap-2">
             <Badge variant="secondary" className="gap-1 text-emerald-600 dark:text-emerald-400">
               <CheckCircle2 size={11} />
-              已去重归档 {archive?.versions ? `v${archive.versions}` : ''}
+              {archive?.archiveLayout === 'backup-chunk' ? '分卷归档' : '已去重归档'}{' '}
+              {archive?.versions ? `v${archive.versions}` : ''}
             </Badge>
             <span className="truncate text-muted-foreground" title={archive?.archiveFileName}>
               {archive?.archiveFileName ?? project.archiveFileName}
@@ -236,8 +288,47 @@ export function ArchiveInspectorSection({
           </div>
 
           {archive ? (
-            <div className="text-[10px] text-muted-foreground">
-              归档：{formatDateTime(archive.archivedAt)} · 校验：{formatDateTime(archive.verifiedAt)}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
+              <span>
+                归档：{formatDateTime(archive.archivedAt)} · 校验：{formatDateTime(archive.verifiedAt)}
+              </span>
+              {archive.archiveLayout === 'backup-chunk' ? (
+                <span className="text-foreground/80">
+                  {archive.volumeCount ? `${archive.volumeCount} 卷` : '多卷'}
+                  {archive.chunkSizeGb ? ` · ${archive.chunkSizeGb}GB/卷` : ''}
+                  {archive.compressionMethod && archive.compressionMethod !== 'default'
+                    ? ` · -${archive.compressionMethod}`
+                    : ''}
+                </span>
+              ) : (
+                <span>单文件兼容</span>
+              )}
+            </div>
+          ) : null}
+
+          {activeMount ? (
+            <div
+              data-lf-archive-mounted=""
+              className="flex items-center justify-between gap-2 rounded border border-emerald-500/40 bg-emerald-500/10 p-2 text-[11px]"
+            >
+              <div className="flex min-w-0 items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-300">
+                <HardDrive size={12} className="shrink-0" />
+                <span className="truncate">
+                  已挂载只读虚拟盘{activeMount.mountPoint ? ` ${activeMount.mountPoint}` : ''}
+                  {activeMount.allVersions ? '（全部版本）' : ''}
+                </span>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-6 shrink-0 border-emerald-500/40 px-2 text-[11px]"
+                disabled={busy}
+                onClick={() => void handleUnmount()}
+              >
+                <Unplug size={11} className="mr-1" />
+                卸载虚拟盘
+              </Button>
             </div>
           ) : null}
 
@@ -383,20 +474,72 @@ export function ArchiveInspectorSection({
               <Download size={12} className="mr-1" />
               全部提取（保留包）
             </Button>
+            {!activeMount ? (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  disabled={busy}
+                  title="通过 WinFsp 将归档包挂载为只读虚拟盘符，免解压直接浏览复制文件"
+                  onClick={() => void handleMount(false)}
+                >
+                  <HardDrive size={12} className="mr-1" />
+                  挂载虚拟盘
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  disabled={busy}
+                  title="将每个历史版本映射为独立快照目录挂载（mount -all），方便对比与找回旧版"
+                  onClick={() => void handleMount(true)}
+                >
+                  <History size={12} className="mr-1" />
+                  挂载全版本
+                </Button>
+              </>
+            ) : null}
           </div>
 
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-6 text-[11px] text-muted-foreground"
-            onClick={() =>
-              void ctx.revealPath(archive?.archiveFileName ?? project.archiveFileName ?? undefined)
-            }
-          >
-            <ExternalLink size={11} className="mr-1" />
-            定位归档包位置
-          </Button>
+          <div className="flex items-center justify-between gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-6 flex-1 text-[11px] text-muted-foreground"
+              onClick={() =>
+                void ctx.revealPath(archive?.archiveFileName ?? project.archiveFileName ?? undefined)
+              }
+            >
+              <ExternalLink size={11} className="mr-1" />
+              定位归档包位置
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-6 text-[11px] text-amber-600 hover:text-amber-700 dark:text-amber-400"
+              disabled={busy}
+              title="归档受损或出现坏道时使用 x -recover 逐块校验 SHA-1 哈希，尽可能抢救所有完好文件（不删除归档包）"
+              onClick={() =>
+                void runTaskAction(
+                  'archive.project.restore',
+                  {
+                    projectId: project.id,
+                    mode: 'recover_keep_archive',
+                    recover: true,
+                  },
+                  `已启动「${project.name}」坏包抢救还原（-recover）`,
+                )
+              }
+            >
+              <LifeBuoy size={11} className="mr-1" />
+              坏包抢救
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/20 p-2.5 text-[11px]">
@@ -429,7 +572,8 @@ export function ArchiveInspectorSection({
             </div>
           ) : null}
           <p className="leading-relaxed text-muted-foreground">
-            先为所有可预览文件生成 360px 缩略图并保留原路径与名称，再用 zpaqfranz 块级去重打包，校验通过后清理源文件。
+            先为所有可预览文件生成 360px 缩略图并保留原路径与名称，再用 zpaqfranz 按{' '}
+            {status?.settings.chunkSizeGb ?? 8}GB/卷 块级去重分卷打包，校验通过后清理源文件。
           </p>
           <Button
             type="button"

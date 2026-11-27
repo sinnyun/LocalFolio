@@ -73,12 +73,31 @@ export async function detectZpaqfranzVersion(binaryPath: string): Promise<string
       stderr: err?.stderr ?? '',
     }))
     const output = `${res.stdout ?? ''}\n${res.stderr ?? ''}`
-    const match = /zpaqfranz\s+v?([0-9]+(?:\.[0-9]+)*[a-z]?)/i.exec(output)
+    const match =
+      /zpaqfranz\s+v?([0-9]+(?:\.[0-9]+)*[a-z]?)/i.exec(output) ??
+      /\bversion\s+v?([0-9]+(?:\.[0-9]+)*[a-z]?)/i.exec(output)
     if (match?.[1]) return match[1]
     return 'installed'
   } catch {
     return 'installed'
   }
+}
+
+export function isZpaqfranzVersionAtLeast(
+  version: string | null | undefined,
+  minMajor: number,
+  minMinor: number,
+): boolean {
+  if (!version) return false
+  const m = /^(\d+)(?:\.(\d+))?/.exec(version.trim())
+  if (!m) {
+    // Non-numeric / custom build marker (e.g. 'installed'): allow by default
+    return true
+  }
+  const major = Number(m[1])
+  const minor = m[2] !== undefined ? Number(m[2]) : 0
+  if (major !== minMajor) return major > minMajor
+  return minor >= minMinor
 }
 
 function applyMirrorPrefix(rawUrl: string, mirrorPrefix: string): string {
@@ -88,12 +107,18 @@ function applyMirrorPrefix(rawUrl: string, mirrorPrefix: string): string {
   return `${prefix}/${rawUrl}`
 }
 
-function pickBestWindowsAsset(
+export function pickBestWindowsAsset(
   releases: readonly GitHubReleaseEntry[],
 ): { readonly tag: string; readonly asset: GitHubReleaseAsset } | null {
   for (const rel of releases) {
     if (rel.draft) continue
     const assets = rel.assets ?? []
+    const exactFull = assets.find(a => /^zpaqfranz-full\.exe$/i.test(a.name ?? ''))
+    if (exactFull?.browser_download_url) return { tag: rel.tag_name ?? 'latest', asset: exactFull }
+
+    const anyFull = assets.find(a => /^zpaqfranz-full.*\.exe$/i.test(a.name ?? ''))
+    if (anyFull?.browser_download_url) return { tag: rel.tag_name ?? 'latest', asset: anyFull }
+
     const exact64 = assets.find(a => /^zpaqfranz64\.exe$/i.test(a.name ?? ''))
     if (exact64?.browser_download_url) return { tag: rel.tag_name ?? 'latest', asset: exact64 }
 
@@ -234,6 +259,9 @@ export function createArchiveToolManager(storage: PluginStorageNamespace): Archi
       defaultSourceDisposal: 'recycle',
       extractCacheMaxMb: 512,
       hideMetaDir: true,
+      chunkSizeGb: 8,
+      compressionMethod: 'default',
+      useSequentialExtract: true,
     }),
   )
 
@@ -248,11 +276,13 @@ export function createArchiveToolManager(storage: PluginStorageNamespace): Archi
           installed: true,
           source: 'custom',
           version: customVer,
+          supportsChunkBackup: isZpaqfranzVersionAtLeast(customVer, 65, 11),
           binaryPath: settings.customBinaryPath,
           managedDir,
           managedBinaryPath,
           settings,
           cacheStats,
+          activeMounts: [],
         }
       }
     }
@@ -263,11 +293,13 @@ export function createArchiveToolManager(storage: PluginStorageNamespace): Archi
         installed: true,
         source: 'managed',
         version: managedVer,
+        supportsChunkBackup: isZpaqfranzVersionAtLeast(managedVer, 65, 11),
         binaryPath: managedBinaryPath,
         managedDir,
         managedBinaryPath,
         settings,
         cacheStats,
+        activeMounts: [],
       }
     }
 
@@ -275,11 +307,13 @@ export function createArchiveToolManager(storage: PluginStorageNamespace): Archi
       installed: false,
       source: 'none',
       version: null,
+      supportsChunkBackup: false,
       binaryPath: null,
       managedDir,
       managedBinaryPath,
       settings,
       cacheStats,
+      activeMounts: [],
     }
   }
 
@@ -435,7 +469,9 @@ export function createArchiveToolManager(storage: PluginStorageNamespace): Archi
             { timeout: 30_000, windowsHide: true },
           )
           const candidates = await fsp.readdir(unpackDir, { recursive: true })
-          const found = candidates.find(name => /zpaqfranz(?:64)?\.exe$/i.test(String(name)))
+          const found =
+            candidates.find(name => /zpaqfranz-full\.exe$/i.test(String(name))) ??
+            candidates.find(name => /zpaqfranz(?:64)?\.exe$/i.test(String(name)))
           if (!found) {
             throw new FolioError('tool_invalid_archive', '压缩包内未找到 zpaqfranz.exe', 500)
           }

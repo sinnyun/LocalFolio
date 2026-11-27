@@ -11,9 +11,11 @@ import {
   normalizeProjectPath,
   toPosixRelPath,
 } from './classify.js'
-import type {
-  ProjectArchivedLiveFileItem,
-  ProjectArchivedLiveInspection,
+import {
+  isProjectArchiveArtifactName,
+  isProjectArchiveVolumeFileName,
+  type ProjectArchivedLiveFileItem,
+  type ProjectArchivedLiveInspection,
 } from '@folio/base-contract'
 import type {
   ProjectChangeSummary,
@@ -75,6 +77,7 @@ async function walkProjectFiles(
     | ((info: ScanProgressInfo) => void)
     | {
         readonly ignoreRootFiles?: ReadonlySet<string>
+        readonly ignoreRootFilePredicate?: (fileName: string) => boolean
         readonly supportedThumbExts?: ReadonlySet<string>
         readonly onProgress?: (info: ScanProgressInfo) => void
       },
@@ -86,6 +89,8 @@ async function walkProjectFiles(
     typeof optionsOrProgress === 'function' ? optionsOrProgress : optionsOrProgress?.onProgress
   const ignoreRootFiles =
     typeof optionsOrProgress === 'function' ? undefined : optionsOrProgress?.ignoreRootFiles
+  const ignoreRootFilePredicate =
+    typeof optionsOrProgress === 'function' ? undefined : optionsOrProgress?.ignoreRootFilePredicate
   const supportedThumbExts =
     typeof optionsOrProgress === 'function' ? undefined : optionsOrProgress?.supportedThumbExts
   const normalizedRoot = normalizeProjectPath(projectPath)
@@ -112,7 +117,8 @@ async function walkProjectFiles(
         if (
           !isDir &&
           current.depth === 0 &&
-          ignoreRootFiles?.has(entry.name.toLowerCase())
+          (ignoreRootFiles?.has(entry.name.toLowerCase()) ||
+            ignoreRootFilePredicate?.(entry.name))
         ) {
           continue
         }
@@ -234,11 +240,29 @@ function diffAgainstManifest(
   return { added, modified, removed }
 }
 
-function buildIgnoredRootFilesSet(existingManifest?: ProjectManifest | null): Set<string> {
-  const set = new Set<string>()
+function buildIgnoredRootFilePredicate(
+  existingManifest?: ProjectManifest | null,
+): ((fileName: string) => boolean) | undefined {
   const archiveFile = existingManifest?.archive?.archiveFileName?.trim()
-  if (archiveFile) set.add(archiveFile.toLowerCase())
-  return set
+  if (!archiveFile) return undefined
+  return (fileName: string) => isProjectArchiveArtifactName(fileName, archiveFile)
+}
+
+async function hasArchiveVolumesOnDisk(
+  projectPath: string,
+  archiveFileName: string,
+): Promise<boolean> {
+  try {
+    const entries = await fsp.readdir(projectPath, { withFileTypes: true })
+    for (const entry of entries) {
+      if (entry.isFile() && isProjectArchiveVolumeFileName(entry.name, archiveFileName)) {
+        return true
+      }
+    }
+    return false
+  } catch {
+    return false
+  }
 }
 
 function buildGroupsAndStats(files: readonly ProjectFileEntry[]): {
@@ -365,12 +389,12 @@ export async function classifyArchivedLiveFiles(
     }
   }
 
-  const ignoreRootFiles = buildIgnoredRootFilesSet(manifest)
+  const ignoreRootFilePredicate = buildIgnoredRootFilePredicate(manifest)
   const extSet = supportedThumbExts
     ? new Set(supportedThumbExts.map(e => e.toLowerCase()))
     : undefined
   const { files: liveFiles } = await walkProjectFiles(projectPath, {
-    ignoreRootFiles,
+    ignoreRootFilePredicate,
     supportedThumbExts: extSet,
   })
   const classified = classifyLiveAgainstManifest(liveFiles, manifest)
@@ -476,12 +500,12 @@ export async function scanProjectDirectory(
     throw new Error(`项目路径不是有效文件夹: ${projectPath}`)
   }
 
-  const ignoreRootFiles = buildIgnoredRootFilesSet(existingManifest)
+  const ignoreRootFilePredicate = buildIgnoredRootFilePredicate(existingManifest)
   const supportedThumbExts = options?.supportedThumbExts
     ? new Set(options.supportedThumbExts.map(e => e.toLowerCase()))
     : undefined
   const { files } = await walkProjectFiles(projectPath, {
-    ignoreRootFiles,
+    ignoreRootFilePredicate,
     supportedThumbExts,
     onProgress,
   })
@@ -491,13 +515,10 @@ export async function scanProjectDirectory(
     existingManifest?.archive?.mode === 'archived' &&
     existingManifest.archive.sourceDisposal !== 'keep'
   ) {
-    let archiveExists = false
-    try {
-      const ast = await fsp.stat(path.join(projectPath, existingManifest.archive.archiveFileName))
-      archiveExists = ast.isFile()
-    } catch {
-      archiveExists = false
-    }
+    const archiveExists = await hasArchiveVolumesOnDisk(
+      projectPath,
+      existingManifest.archive.archiveFileName,
+    )
     if (archiveExists) {
       if (files.length === 0) {
         const now = Date.now()
@@ -627,16 +648,12 @@ export async function checkProjectChanges(
     }
   }
 
-  const ignoreRootFiles = buildIgnoredRootFilesSet(manifest)
+  const ignoreRootFilePredicate = buildIgnoredRootFilePredicate(manifest)
   if (manifest.archive?.mode === 'archived') {
-    const archivePath = path.join(projectPath, manifest.archive.archiveFileName)
-    let archiveExists = false
-    try {
-      const ast = await fsp.stat(archivePath)
-      archiveExists = ast.isFile()
-    } catch {
-      archiveExists = false
-    }
+    const archiveExists = await hasArchiveVolumesOnDisk(
+      projectPath,
+      manifest.archive.archiveFileName,
+    )
     if (!archiveExists) {
       return {
         projectId: manifest.projectId,
@@ -645,7 +662,7 @@ export async function checkProjectChanges(
         missing: true,
       }
     }
-    const { files: liveFiles } = await walkProjectFiles(projectPath, { ignoreRootFiles })
+    const { files: liveFiles } = await walkProjectFiles(projectPath, { ignoreRootFilePredicate })
     if (manifest.archive.sourceDisposal === 'keep') {
       const changeSummary = diffAgainstManifest(liveFiles, manifest)
       const hasChanges =
@@ -669,7 +686,7 @@ export async function checkProjectChanges(
     }
   }
 
-  const { files } = await walkProjectFiles(projectPath, { ignoreRootFiles })
+  const { files } = await walkProjectFiles(projectPath, { ignoreRootFilePredicate })
   const changeSummary = diffAgainstManifest(files, manifest)
   const hasChanges =
     changeSummary.added > 0 || changeSummary.modified > 0 || changeSummary.removed > 0

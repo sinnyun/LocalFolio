@@ -16,9 +16,15 @@ import {
   buildDefaultArchiveFileName,
   createProjectArchiveService,
   type ArchiveCliRunner,
+  type MountedArchiveHandle,
 } from './archive-service.js'
 import { createArchiveToolManager } from './archive-tool.js'
-import { ArchiveSourceDisposalSchema } from './types.js'
+import {
+  ArchiveCompressionMethodSchema,
+  ArchiveSourceDisposalSchema,
+  type ArchiveMountSessionInfo,
+  type ArchiveToolStatus,
+} from './types.js'
 
 export interface RegisterFeatureArchiveHostOptions {
   readonly runtime: FolioRuntimeService
@@ -32,6 +38,11 @@ export interface RegisterFeatureArchiveHostOptions {
 export interface ManagedFeatureArchiveHost {
   attachProjectsHost(projectsHost: FolioProjectsHostService): () => void
   dispose(): void
+}
+
+interface ActiveMountEntry {
+  readonly info: ArchiveMountSessionInfo
+  readonly handle: MountedArchiveHandle
 }
 
 export function registerFeatureArchiveHost(
@@ -48,6 +59,27 @@ export function registerFeatureArchiveHost(
 
   let attachedProjectsHost: FolioProjectsHostService | null = options.projectsHost ?? null
   let attachedResolverDisposer: (() => void) | null = null
+  const activeMounts = new Map<string, ActiveMountEntry>()
+
+  const listActiveMountInfos = (): ArchiveMountSessionInfo[] =>
+    Array.from(activeMounts.values()).map(entry => entry.info)
+
+  const getStatusWithMounts = async (): Promise<ArchiveToolStatus> => {
+    const base = await toolManager.getStatus()
+    return {
+      ...base,
+      activeMounts: listActiveMountInfos(),
+    }
+  }
+
+  const unmountProjectIfMounted = async (projectId: string): Promise<boolean> => {
+    const entry = activeMounts.get(projectId)
+    if (!entry) return false
+    activeMounts.delete(projectId)
+    await entry.handle.unmount().catch(() => {})
+    runtime.events.emitInvalidate('archive', projectId)
+    return true
+  }
 
   const requireProjectsHost = (): FolioProjectsHostService => {
     if (!attachedProjectsHost) {
@@ -92,9 +124,11 @@ export function registerFeatureArchiveHost(
       },
       async resolveForReveal(ctx) {
         if (ctx.archive?.mode !== 'archived' || !ctx.archive.archiveFileName) return null
-        const archiveAbs = path.join(ctx.project.path, ctx.archive.archiveFileName)
-        const exists = await fsp.stat(archiveAbs).catch(() => null)
-        return { localPath: exists ? archiveAbs : ctx.project.path }
+        const artifacts = await archiveService.listArchiveArtifacts(
+          ctx.project.path,
+          ctx.archive.archiveFileName,
+        )
+        return { localPath: artifacts.primaryRevealPath ?? ctx.project.path }
       },
     })
 
@@ -118,7 +152,7 @@ export function registerFeatureArchiveHost(
         title: '查询 zpaqfranz 归档引擎安装状态与缓存统计',
         tier: 'read',
         input: z.object({}).default({}),
-        run: async () => toolManager.getStatus(),
+        run: async () => getStatusWithMounts(),
       }),
     ),
 
@@ -152,7 +186,7 @@ export function registerFeatureArchiveHost(
                 },
               })
               runtime.events.emitInvalidate('archive')
-              return status
+              return { ...status, activeMounts: listActiveMountInfos() }
             },
           })
           return { task: handle.snapshot() }
@@ -179,13 +213,13 @@ export function registerFeatureArchiveHost(
               multi: false,
             })
             if (pick.cancelled || pick.paths.length === 0) {
-              return { cancelled: true, status: await toolManager.getStatus() }
+              return { cancelled: true, status: await getStatusWithMounts() }
             }
             chosenPath = pick.paths[0]!
           }
-          const status = await toolManager.importLocalBinary(chosenPath)
+          await toolManager.importLocalBinary(chosenPath)
           runtime.events.emitInvalidate('archive')
-          return { cancelled: false, status }
+          return { cancelled: false, status: await getStatusWithMounts() }
         },
       }),
     ),
@@ -215,6 +249,9 @@ export function registerFeatureArchiveHost(
           defaultSourceDisposal: ArchiveSourceDisposalSchema.optional(),
           extractCacheMaxMb: z.number().int().min(64).max(16384).optional(),
           hideMetaDir: z.boolean().optional(),
+          chunkSizeGb: z.number().min(0.25).max(1024).optional(),
+          compressionMethod: ArchiveCompressionMethodSchema.optional(),
+          useSequentialExtract: z.boolean().optional(),
         }),
         run: async input => {
           const updated = await toolManager.updateSettings(input)
@@ -227,7 +264,7 @@ export function registerFeatureArchiveHost(
             )
           }
           runtime.events.emitInvalidate('archive')
-          return toolManager.getStatus()
+          return getStatusWithMounts()
         },
       }),
     ),
@@ -258,11 +295,19 @@ export function registerFeatureArchiveHost(
         run: async input => {
           const projectsHost = requireProjectsHost()
           const binaryPath = await toolManager.requireActiveBinary()
+          const toolStatus = await toolManager.getStatus()
+          if (!toolStatus.supportsChunkBackup) {
+            throw new FolioError(
+              'archive_tool_outdated',
+              `当前 zpaqfranz (${toolStatus.version ?? 'unknown'}) 版本过旧，不支持 -chunk 固定大小分卷（需 ≥ 65.11），请在「归档设置」中一键更新`,
+              400,
+            )
+          }
           const project = await projectsHost.resolveProject(input.projectId)
           if (!project) {
             throw new FolioError('project_not_found', `项目不存在: ${input.projectId}`, 404)
           }
-          const settings = await toolManager.getSettings()
+          const settings = toolStatus.settings
           const sourceDisposal = input.sourceDisposal ?? settings.defaultSourceDisposal
 
           const handle = tasks.enqueue({
@@ -271,7 +316,7 @@ export function registerFeatureArchiveHost(
             concurrency: 1,
             pausable: false,
             cancellable: true,
-            title: `归档打包：${project.name}`,
+            title: `分卷归档打包：${project.name}`,
             meta: { projectId: project.id, mode: 'archive-pack' },
             run: async helpers => {
               helpers.throwIfAborted()
@@ -313,7 +358,7 @@ export function registerFeatureArchiveHost(
               helpers.reportProgress({
                 current: 35,
                 total: 100,
-                message: `步骤 2/4：正在块级去重打包为 ${archiveFileName}…`,
+                message: `步骤 2/4：正在按 ${settings.chunkSizeGb}GB/卷 去重打包为 ${archiveFileName}…`,
               })
 
               await archiveService.runner.add({
@@ -321,6 +366,9 @@ export function registerFeatureArchiveHost(
                 projectPath: project.path,
                 archiveFileName,
                 entries,
+                layout: 'backup-chunk',
+                chunkSizeGb: settings.chunkSizeGb,
+                compressionMethod: settings.compressionMethod,
                 signal: helpers.signal,
                 onProgress: (pct, line) => {
                   const mapped = pct !== null ? 35 + Math.round(pct * 0.4) : 50
@@ -336,7 +384,7 @@ export function registerFeatureArchiveHost(
               helpers.reportProgress({
                 current: 75,
                 total: 100,
-                message: '步骤 3/4：正在校验 .zpaq 归档完整性…',
+                message: '步骤 3/4：正在校验 .zpaq 分卷归档完整性…',
               })
 
               await archiveService.runner.test({
@@ -372,13 +420,27 @@ export function registerFeatureArchiveHost(
                 sourceDisposal,
               )
 
-              const archiveStat = await fsp.stat(path.join(project.path, archiveFileName))
+              const artifacts = await archiveService.listArchiveArtifacts(
+                project.path,
+                archiveFileName,
+              )
+              if (artifacts.volumeFiles.length === 0) {
+                throw new FolioError(
+                  'archive_missing',
+                  `未检测到已生成的归档分卷文件: ${archiveFileName}`,
+                  500,
+                )
+              }
               const now = Date.now()
               const archiveMeta: ProjectArchiveMetaInfo = {
                 mode: 'archived',
                 engine: 'zpaqfranz',
                 archiveFileName,
-                archiveBytes: archiveStat.size,
+                archiveLayout: 'backup-chunk',
+                chunkSizeGb: settings.chunkSizeGb,
+                volumeCount: artifacts.volumeFiles.length,
+                compressionMethod: settings.compressionMethod,
+                archiveBytes: artifacts.totalBytes,
                 originalBytes: snapshot.stats.totalBytes,
                 archivedFileCount: snapshot.stats.fileCount,
                 archivedAt: now,
@@ -393,7 +455,7 @@ export function registerFeatureArchiveHost(
               helpers.reportProgress({
                 current: 100,
                 total: 100,
-                message: `归档完成：${archiveFileName}（缩略图预热 ${warmRes.warmed} 张）`,
+                message: `分卷归档完成：${archiveFileName}（共 ${artifacts.volumeFiles.length} 卷，缩略图预热 ${warmRes.warmed} 张）`,
               })
               return { archive: archiveMeta, disposed }
             },
@@ -478,8 +540,15 @@ export function registerFeatureArchiveHost(
         tier: 'modify',
         input: z.object({
           projectId: z.string().min(1),
-          mode: z.enum(['restore_and_remove_archive', 'extract_all_keep_archive']).optional(),
+          mode: z
+            .enum([
+              'restore_and_remove_archive',
+              'extract_all_keep_archive',
+              'recover_keep_archive',
+            ])
+            .optional(),
           removeArchive: z.boolean().optional(),
+          recover: z.boolean().optional(),
         }),
         run: async input => {
           const projectsHost = requireProjectsHost()
@@ -494,11 +563,13 @@ export function registerFeatureArchiveHost(
           }
           const archiveMeta = snapshot.archive
           const settings = await toolManager.getSettings()
-          const resolvedMode =
-            input.mode ??
-            (input.removeArchive === false
-              ? 'extract_all_keep_archive'
-              : 'restore_and_remove_archive')
+          const resolvedMode = input.recover
+            ? 'recover_keep_archive'
+            : (input.mode ??
+              (input.removeArchive === false
+                ? 'extract_all_keep_archive'
+                : 'restore_and_remove_archive'))
+          const isRecover = resolvedMode === 'recover_keep_archive'
 
           const handle = tasks.enqueue({
             scope: 'projects',
@@ -506,8 +577,9 @@ export function registerFeatureArchiveHost(
             concurrency: 1,
             pausable: false,
             cancellable: true,
-            title:
-              resolvedMode === 'extract_all_keep_archive'
+            title: isRecover
+              ? `坏包抢救还原：${project.name}`
+              : resolvedMode === 'extract_all_keep_archive'
                 ? `全部提取（保留包）：${project.name}`
                 : `解包还原并移除包：${project.name}`,
             meta: { projectId: project.id, mode: 'archive-restore', resolvedMode },
@@ -515,23 +587,27 @@ export function registerFeatureArchiveHost(
               helpers.reportProgress({
                 current: 10,
                 total: 100,
-                message: `正在解包 ${archiveMeta.archiveFileName}…`,
+                message: isRecover
+                  ? `正在逐块校验并抢救还原 ${archiveMeta.archiveFileName}…`
+                  : `正在${settings.useSequentialExtract ? '顺序' : ''}解包 ${archiveMeta.archiveFileName}…`,
               })
               await archiveService.runner.extractAll({
                 binaryPath,
                 projectPath: project.path,
                 archiveFileName: archiveMeta.archiveFileName,
+                sequential: settings.useSequentialExtract,
+                recover: isRecover,
                 signal: helpers.signal,
                 onProgress: (pct, line) => {
                   helpers.reportProgress({
                     current: pct !== null ? Math.min(82, Math.round(pct * 0.82)) : 45,
                     total: 100,
-                    message: `解包中：${line}`,
+                    message: `${isRecover ? '抢救中' : '解包中'}：${line}`,
                   })
                 },
               })
 
-              if (resolvedMode === 'extract_all_keep_archive') {
+              if (resolvedMode === 'extract_all_keep_archive' || isRecover) {
                 helpers.reportProgress({
                   current: 88,
                   total: 100,
@@ -567,19 +643,34 @@ export function registerFeatureArchiveHost(
                 helpers.reportProgress({
                   current: 100,
                   total: 100,
-                  message: `已全部提取 ${extractedFiles.length} 个文件到原位置（保留 ${archiveMeta.archiveFileName}）`,
+                  message: isRecover
+                    ? `坏包抢救完成：已还原 ${extractedFiles.length}/${snapshot.files.length} 个完好文件（原归档包已保留）`
+                    : `已全部提取 ${extractedFiles.length} 个文件到原位置（保留 ${archiveMeta.archiveFileName}）`,
                 })
-                return { restored: true, mode: resolvedMode, extractedCount: extractedFiles.length }
+                return {
+                  restored: true,
+                  mode: resolvedMode,
+                  recovered: isRecover,
+                  extractedCount: extractedFiles.length,
+                  totalExpected: snapshot.files.length,
+                }
               }
+
+              await unmountProjectIfMounted(project.id)
 
               helpers.reportProgress({
                 current: 86,
                 total: 100,
-                message: `正在将 ${archiveMeta.archiveFileName} 移入回收站…`,
+                message: `正在将 ${archiveMeta.archiveFileName} 分卷归档移入回收站…`,
               })
+              const artifacts = await archiveService.listArchiveArtifacts(
+                project.path,
+                archiveMeta.archiveFileName,
+              )
+              const toRemove = [...artifacts.allFiles, ...artifacts.transientFiles].map(f => f.name)
               await archiveService.disposeSourceEntries(
                 project.path,
-                [archiveMeta.archiveFileName],
+                toRemove.length > 0 ? toRemove : [archiveMeta.archiveFileName],
                 'recycle',
               )
 
@@ -754,7 +845,16 @@ export function registerFeatureArchiveHost(
             throw new FolioError('not_archived', '当前项目尚未归档，请先执行首次归档打包', 400)
           }
           const archiveMeta = snapshot.archive
-          const settings = await toolManager.getSettings()
+          const toolStatus = await toolManager.getStatus()
+          const settings = toolStatus.settings
+          const layout = archiveMeta.archiveLayout ?? 'single'
+          if (layout === 'backup-chunk' && !toolStatus.supportsChunkBackup) {
+            throw new FolioError(
+              'archive_tool_outdated',
+              `当前 zpaqfranz (${toolStatus.version ?? 'unknown'}) 版本过旧，不支持 -chunk 分卷追加（需 ≥ 65.11），请在「归档设置」中一键更新`,
+              400,
+            )
+          }
           const sourceDisposal = input.sourceDisposal ?? settings.defaultSourceDisposal
 
           const handle = tasks.enqueue({
@@ -814,6 +914,9 @@ export function registerFeatureArchiveHost(
                 projectPath: project.path,
                 archiveFileName: archiveMeta.archiveFileName,
                 entries: addEntries,
+                layout,
+                chunkSizeGb: archiveMeta.chunkSizeGb ?? settings.chunkSizeGb,
+                compressionMethod: settings.compressionMethod,
                 signal: helpers.signal,
                 onProgress: (pct, line) => {
                   const mapped = pct !== null ? 35 + Math.round(pct * 0.4) : 55
@@ -872,13 +975,15 @@ export function registerFeatureArchiveHost(
               let nextOriginalBytes = 0
               for (const sz of mergedSizes.values()) nextOriginalBytes += sz
 
-              const archiveStat = await fsp.stat(
-                path.join(project.path, archiveMeta.archiveFileName),
+              const artifacts = await archiveService.listArchiveArtifacts(
+                project.path,
+                archiveMeta.archiveFileName,
               )
               const now = Date.now()
               const nextArchiveMeta: ProjectArchiveMetaInfo = {
                 ...archiveMeta,
-                archiveBytes: archiveStat.size,
+                volumeCount: Math.max(1, artifacts.volumeFiles.length),
+                archiveBytes: artifacts.totalBytes,
                 originalBytes: nextOriginalBytes,
                 archivedFileCount: mergedSizes.size,
                 archivedAt: now,
@@ -1069,16 +1174,122 @@ export function registerFeatureArchiveHost(
             destDir = pick.folderPath
           }
 
-          const exportedPath = await archiveService.exportArchiveToDestination({
+          const exported = await archiveService.exportArchiveToDestination({
             projectPath: project.path,
             archiveFileName: snapshot.archive.archiveFileName,
             destDir,
           })
 
           if (input.reveal) {
-            await native.revealPath(exportedPath).catch(() => {})
+            await native.revealPath(exported.exportedPath).catch(() => {})
           }
-          return { cancelled: false, exportedPath }
+          return {
+            cancelled: false,
+            exportedPath: exported.exportedPath,
+            exportedFiles: exported.exportedFiles,
+          }
+        },
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'archive.project.mount',
+        title: '将项目 .zpaq 归档挂载为只读虚拟盘符（免解压浏览）',
+        tier: 'modify',
+        input: z.object({
+          projectId: z.string().min(1),
+          allVersions: z.boolean().optional().default(false),
+          driveLetter: z.string().optional(),
+          openInExplorer: z.boolean().optional().default(true),
+        }),
+        run: async input => {
+          const projectsHost = requireProjectsHost()
+          const binaryPath = await toolManager.requireActiveBinary()
+          if (!archiveService.runner.mount) {
+            throw new FolioError(
+              'archive_mount_unsupported',
+              '当前归档运行器不支持虚拟盘挂载',
+              501,
+            )
+          }
+          const project = await projectsHost.resolveProject(input.projectId)
+          if (!project) {
+            throw new FolioError('project_not_found', `项目不存在: ${input.projectId}`, 404)
+          }
+          const snapshot = await projectsHost.readProjectSnapshot(project.id)
+          if (!snapshot?.archive || snapshot.archive.mode !== 'archived') {
+            throw new FolioError('not_archived', '当前项目尚未归档', 400)
+          }
+
+          const existing = activeMounts.get(project.id)
+          if (existing) {
+            if (input.openInExplorer && existing.info.mountPoint) {
+              await native.openPath(existing.info.mountPoint).catch(() => {})
+            }
+            return { mount: existing.info, alreadyMounted: true }
+          }
+
+          const artifacts = await archiveService.listArchiveArtifacts(
+            project.path,
+            snapshot.archive.archiveFileName,
+          )
+          if (artifacts.volumeFiles.length === 0) {
+            throw new FolioError(
+              'archive_missing',
+              `归档包不存在: ${snapshot.archive.archiveFileName}`,
+              404,
+            )
+          }
+
+          const archiveAbsPath = path.join(project.path, snapshot.archive.archiveFileName)
+          const handle = await archiveService.runner.mount({
+            binaryPath,
+            projectPath: project.path,
+            archiveAbsPath,
+            allVersions: input.allVersions,
+            driveLetter: input.driveLetter,
+          })
+
+          const info: ArchiveMountSessionInfo = {
+            projectId: project.id,
+            projectName: project.name,
+            archiveFileName: snapshot.archive.archiveFileName,
+            mountPoint: handle.mountPoint,
+            allVersions: Boolean(input.allVersions),
+            startedAt: Date.now(),
+            pid: handle.pid,
+          }
+          activeMounts.set(project.id, { info, handle })
+
+          void handle.onExit.then(() => {
+            const current = activeMounts.get(project.id)
+            if (current?.handle === handle) {
+              activeMounts.delete(project.id)
+              runtime.events.emitInvalidate('archive', project.id)
+            }
+          })
+
+          if (input.openInExplorer && info.mountPoint) {
+            await native.openPath(info.mountPoint).catch(() => {})
+          }
+          runtime.events.emitInvalidate('archive', project.id)
+          return { mount: info, alreadyMounted: false }
+        },
+      }),
+    ),
+
+    runtime.registerAction(
+      defineAction({
+        id: 'archive.project.unmount',
+        title: '卸载已挂载的项目 .zpaq 只读虚拟盘',
+        tier: 'modify',
+        input: z.object({
+          projectId: z.string().min(1),
+        }),
+        run: async input => {
+          const unmounted = await unmountProjectIfMounted(input.projectId)
+          return { unmounted }
         },
       }),
     ),
@@ -1087,6 +1298,10 @@ export function registerFeatureArchiveHost(
   return {
     attachProjectsHost,
     dispose() {
+      for (const entry of activeMounts.values()) {
+        void entry.handle.unmount().catch(() => {})
+      }
+      activeMounts.clear()
       attachedResolverDisposer?.()
       attachedResolverDisposer = null
       attachedProjectsHost = null

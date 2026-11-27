@@ -6,6 +6,12 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 ---
 
+## 0.3.0-alpha.5
+
+- 升级项目库归档插件（`@folio/feature-archive-host` + `@folio/feature-archive-ui`）与扫描器（`@folio/workspace-projects-host`）：新归档全面切换为 `zpaqfranz backup -chunk` 固定大小分卷模式（默认 `8GB`/卷，可在设置中调整，保留跨卷去重与 `.tmp` 中断安全，同时向后兼容既有单文件 `.zpaq`）。
+- 归档引擎支持可选 Zstd 压缩等级（默认平衡 / `-m9` / `-m7`）、机械硬盘顺序写入解压（`xx`）以及损坏归档抢救还原（`x -recover`）。
+- 一键下载优先托管内置 WinFsp 支持的 `zpaqfranz-full.exe`，并新增只读虚拟盘挂载（`mount` / `mount -all`）与自动卸载生命周期管理。
+
 ## 0.3.0-alpha.4
 
 - 升级 `@folio/base-thumbs-host` 缩略图引擎至 v3 架构（方案 B 极致轻量主包）：引入 L0 持久化状态机（优先内置 `node:sqlite` + JSON Store 自动降级与中央 LRU 缓存）、杂项黑名单、三队列并发隔离（`thumbs-fast` / `thumbs-heavy` / `thumbs-eagle`）、L1a/L1b 去白名单化 Try-First 试探与 `>200MB` 重型 PSD/PSB/TIF 避让，以及 L2 ImageMagick 7（内置 `sRGB.icc` + `[0]` 抽层）与 FFmpeg 专项降级。
@@ -80,6 +86,6 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 | 包 | 版本 |
 |---|---|
-| `localfolio-monorepo`（根）、`@folio/workbench-suite` | `0.3.0-alpha.4` |
+| `localfolio-monorepo`（根）、`@folio/workbench-suite` | `0.3.0-alpha.5` |
 | `@folio/base-storage-host`、`base-runtime-host`、`base-settings-ui`、`test-overview-host` | `0.2.0-alpha.0` |
 | 其余包（含 `@folio/test-suite`） | `0.3.0-alpha.0` |

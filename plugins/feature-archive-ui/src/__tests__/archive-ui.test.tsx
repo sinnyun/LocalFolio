@@ -129,7 +129,8 @@ const archivedDetail: ProjectDetailResult = {
 const toolInstalledStatus: ArchiveToolStatus = {
   installed: true,
   source: 'managed',
-  version: '60.1',
+  version: '65.22',
+  supportsChunkBackup: true,
   binaryPath: 'C:\\LocalFolio\\tools\\zpaqfranz\\zpaqfranz.exe',
   managedDir: 'C:\\LocalFolio\\tools\\zpaqfranz',
   managedBinaryPath: 'C:\\LocalFolio\\tools\\zpaqfranz\\zpaqfranz.exe',
@@ -139,12 +140,16 @@ const toolInstalledStatus: ArchiveToolStatus = {
     defaultSourceDisposal: 'recycle',
     extractCacheMaxMb: 512,
     hideMetaDir: true,
+    chunkSizeGb: 8,
+    compressionMethod: 'default',
+    useSequentialExtract: true,
   },
   cacheStats: {
     fileCount: 1,
     totalBytes: 2048,
     cacheDir: 'C:\\LocalFolio\\cache\\extracted',
   },
+  activeMounts: [],
 }
 
 describe('@folio/feature-archive-ui', () => {

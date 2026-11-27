@@ -11,6 +11,7 @@
     "ui:add": "node scripts/add-ui.mjs",
     "typecheck": "tsc --noEmit",
     "check:artifacts": "node scripts/check-artifacts.mjs",
+    "pack:workbench": "node scripts/pack-workbench.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "verify": "pnpm run typecheck && pnpm run build && pnpm run check:artifacts && pnpm run test"

@@ -41,9 +41,24 @@ describe('@folio/base-storage-host', () => {
   it('safely probes ctx.get("fs") without throwing on Cordis-style Proxy contexts', async () => {
     const files = new Map<string, string>()
     const fakeDshFs = {
-      readText: vi.fn(async (p: string) => files.get(p) ?? null),
-      writeText: vi.fn(async (p: string, text: string) => {
-        files.set(p, text)
+      resolve: vi.fn(async (p: string) => ({ targetKey: `opaque:${p}`, displayPath: p })),
+      readText: vi.fn(async (target: { targetKey: string }) => {
+        expect(target.targetKey).toBeTypeOf('string')
+        const text = files.get(target.targetKey)
+        if (text === undefined) throw Object.assign(new Error('missing file'), { code: 'FS_NOT_FOUND' })
+        return text
+      }),
+      writeText: vi.fn(async (target: { targetKey: string }, text: string) => {
+        expect(target.targetKey).toBeTypeOf('string')
+        files.set(target.targetKey, text)
+      }),
+      stat: vi.fn(async (target: { targetKey: string }) => files.has(target.targetKey) ? {} : undefined),
+      listDir: vi.fn(async (target: { displayPath: string }) => {
+        expect(target.displayPath).toBe('/virtual')
+        return [{ name: 'sub', type: 'directory', target: { displayPath: '/virtual/sub' } }]
+      }),
+      deleteFile: vi.fn(async (target: { targetKey: string }) => {
+        if (!files.delete(target.targetKey)) throw Object.assign(new Error('missing file'), { code: 'FS_STALE_VERSION' })
       }),
     }
     const proxyCtx = new Proxy(
@@ -58,7 +73,14 @@ describe('@folio/base-storage-host', () => {
 
     const seam = createFsSeam(proxyCtx)
     expect(seam.provider).toBe('dsh-ctx-fs')
+    expect(await seam.readText('/virtual/a.json')).toBeNull()
+    expect(await seam.exists('/virtual/a.json')).toBe(false)
     await seam.writeText('/virtual/a.json', '{"ok":true}')
     expect(await seam.readText('/virtual/a.json')).toBe('{"ok":true}')
+    expect(await seam.exists('/virtual/a.json')).toBe(true)
+    expect(await seam.listDir('/virtual')).toEqual([{ name: 'sub', path: '/virtual/sub', isDirectory: true }])
+    await seam.remove('/virtual/a.json')
+    await expect(seam.remove('/virtual/a.json')).resolves.toBeUndefined()
+    expect(await seam.readText('/virtual/a.json')).toBeNull()
   })
 })

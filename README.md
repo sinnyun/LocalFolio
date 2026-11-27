@@ -150,6 +150,22 @@ pnpm run build:watch     # 修改哪个 plugins/* 就只重编该插件的 lib/c
 
 ### 3. 安装到 DSH profile
 
+#### 安装 GitHub 发布包
+
+在 GitHub Releases 中复制对应版本的 `localfolio-workbench.tgz` 下载地址，粘贴到 DSH 的「插件 → 添加插件 → 包名或地址」。地址格式如下：
+
+```text
+https://github.com/sinnyun/LocalFolio/releases/download/<版本标签>/localfolio-workbench.tgz
+```
+
+归档包含正式工作台套件、它的子插件及画板静态资源。也可以先下载 `.tgz`，再将文件的绝对路径填入同一处。
+
+发布时，将与 `bundles/workbench-suite/package.json` 中 `version` 对应的 `v<版本>` 标签推送到 GitHub。Actions 会构建、运行校验、在临时 DSH profile 中试装，并把归档上传到该标签的 GitHub Release。可在本地运行 `pnpm run build` 和 `pnpm run pack:workbench` 生成 `dist/localfolio-workbench.tgz`。
+
+归档随附 [tldraw 5.6.2 许可证](bundles/workbench-suite/docs/licenses/tldraw-5.6.2.md)。面向最终用户部署画板前，请确认你的 tldraw 授权覆盖该场景。
+
+#### 本地开发安装
+
 ```powershell
 # 1) 以 link: 方式把两个套件装入 profile（默认 lfdev）：
 #    @folio/workbench-suite  产品入口（6 基础能力 + 2 桥接 + 3 工作区）

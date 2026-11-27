@@ -9,18 +9,18 @@ import {
   type JsonStore,
 } from '@folio/base-contract'
 
+interface DshFsTarget {
+  targetKey: string
+  displayPath: string
+}
+
 interface DshFsLike {
-  readText?(filePath: string): Promise<string | { content?: string; text?: string } | null>
-  writeText?(filePath: string, content: string): Promise<unknown>
-  exists?(filePath: string): Promise<boolean>
-  readDir?(
-    dirPath: string,
-  ): Promise<Array<{ name: string; path?: string; isDirectory?: boolean; type?: string }>>
-  listDir?(
-    dirPath: string,
-  ): Promise<Array<{ name: string; path?: string; isDirectory?: boolean; type?: string }>>
-  remove?(filePath: string): Promise<unknown>
-  unlink?(filePath: string): Promise<unknown>
+  resolve(filePath: string): Promise<DshFsTarget>
+  readText(target: DshFsTarget): Promise<string>
+  writeText(target: DshFsTarget, content: string): Promise<unknown>
+  stat(target: DshFsTarget): Promise<object | undefined>
+  listDir(target: DshFsTarget): Promise<Array<{ name: string; type: string; target: DshFsTarget }>>
+  deleteFile(target: DshFsTarget): Promise<unknown>
 }
 
 interface ContextWithFsLike {
@@ -47,16 +47,20 @@ function resolveDshFs(ctx: unknown): DshFsLike | null {
   }
   if (!candidate || typeof candidate !== 'object') return null
   const fsObj = candidate as DshFsLike
-  if (typeof fsObj.readText === 'function' && typeof fsObj.writeText === 'function') {
+  const methods = ['resolve', 'readText', 'writeText', 'stat', 'listDir', 'deleteFile'] as const
+  if (methods.every(method => typeof fsObj[method] === 'function')) {
     return fsObj
   }
   return null
 }
 
+function errorCode(error: unknown): unknown {
+  return error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined
+}
+
 function isNotFoundError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false
-  const code = (error as { code?: unknown }).code
-  return code === 'ENOENT' || code === 'NOT_FOUND'
+  const code = errorCode(error)
+  return code === 'ENOENT' || code === 'FS_NOT_FOUND'
 }
 
 export function createLocalFsSeam(): FsSeam {
@@ -115,20 +119,23 @@ export function createLocalFsSeam(): FsSeam {
 
 export function createFsSeam(ctx?: unknown): FsSeam {
   const dshFs = resolveDshFs(ctx)
-  const fallback = createLocalFsSeam()
-  if (!dshFs) return fallback
+  if (!dshFs) return createLocalFsSeam()
+
+  const exists = async (filePath: string): Promise<boolean> => {
+    try {
+      return (await dshFs.stat(await dshFs.resolve(filePath))) !== undefined
+    } catch (error) {
+      if (isNotFoundError(error)) return false
+      throw error
+    }
+  }
 
   return {
     provider: 'dsh-ctx-fs',
 
     async readText(filePath: string): Promise<string | null> {
       try {
-        const res = await dshFs.readText!(filePath)
-        if (res === null || res === undefined) return null
-        if (typeof res === 'string') return res
-        if (typeof res.content === 'string') return res.content
-        if (typeof res.text === 'string') return res.text
-        return null
+        return await dshFs.readText(await dshFs.resolve(filePath))
       } catch (error) {
         if (isNotFoundError(error)) return null
         throw error
@@ -136,37 +143,34 @@ export function createFsSeam(ctx?: unknown): FsSeam {
     },
 
     async writeText(filePath: string, content: string): Promise<void> {
-      await dshFs.writeText!(filePath, content)
+      await dshFs.writeText(await dshFs.resolve(filePath), content)
     },
 
-    async exists(filePath: string): Promise<boolean> {
-      if (typeof dshFs.exists === 'function') return await dshFs.exists(filePath)
-      return (await this.readText(filePath)) !== null
-    },
+    exists,
 
     async listDir(dirPath: string): Promise<readonly DirEntryInfo[]> {
-      const fn = dshFs.listDir ?? dshFs.readDir
-      if (typeof fn === 'function') {
-        const rows = await fn.call(dshFs, dirPath)
+      try {
+        const rows = await dshFs.listDir(await dshFs.resolve(dirPath))
         return rows.map(row => ({
           name: row.name,
-          path: row.path ?? path.join(dirPath, row.name),
-          isDirectory: row.isDirectory ?? row.type === 'directory',
+          path: row.target.displayPath,
+          isDirectory: row.type === 'directory',
         }))
+      } catch (error) {
+        if (isNotFoundError(error)) return []
+        throw error
       }
-      return fallback.listDir(dirPath)
     },
 
     async remove(filePath: string): Promise<void> {
-      if (typeof dshFs.remove === 'function') {
-        await dshFs.remove(filePath)
-        return
+      try {
+        await dshFs.deleteFile(await dshFs.resolve(filePath))
+      } catch (error) {
+        if (isNotFoundError(error)) return
+        // fs-local reports a missing delete target as a stale version.
+        if (errorCode(error) === 'FS_STALE_VERSION' && !(await exists(filePath))) return
+        throw error
       }
-      if (typeof dshFs.unlink === 'function') {
-        await dshFs.unlink(filePath)
-        return
-      }
-      await fallback.remove(filePath)
     },
   }
 }

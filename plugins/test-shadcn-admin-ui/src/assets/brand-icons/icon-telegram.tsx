@@ -1,5 +1,5 @@
 import { type SVGProps } from 'react'
-import { cn } from '@/lib/utils'
+import { cn } from '@folio/base-ui-kit/client'
 
 export function IconTelegram({ className, ...props }: SVGProps<SVGSVGElement>) {
   return (

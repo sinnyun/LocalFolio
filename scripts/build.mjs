@@ -12,6 +12,7 @@
 
 import esbuild from 'esbuild'
 import { execFileSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -159,21 +160,12 @@ function workerOptions(workerEntry) {
 
 function compileTailwind(plugin) {
   if (!plugin.hasTailwind) return
-  const binName = process.platform === 'win32' ? 'tailwindcss.cmd' : 'tailwindcss'
-  const candidates = [
-    path.join(plugin.dir, 'node_modules', '.bin', binName),
-    path.join(repoRoot, 'node_modules', '.bin', binName),
-  ]
-  const bin = candidates.find(p => fs.existsSync(p))
-  if (!bin) {
-    throw new Error(`tailwindcss CLI not found for ${plugin.name}; run pnpm install first`)
-  }
+  const require = createRequire(path.join(plugin.dir, 'package.json'))
+  const manifestPath = require.resolve('@tailwindcss/cli/package.json')
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+  const bin = path.resolve(path.dirname(manifestPath), manifest.bin.tailwindcss)
   const args = ['-i', plugin.tailwindInput, '-o', plugin.tailwindOutput, '--minify']
-  if (process.platform === 'win32') {
-    execFileSync('cmd.exe', ['/c', bin, ...args], { cwd: plugin.dir, stdio: 'pipe' })
-  } else {
-    execFileSync(bin, args, { cwd: plugin.dir, stdio: 'pipe' })
-  }
+  execFileSync(process.execPath, [bin, ...args], { cwd: plugin.dir, stdio: 'pipe' })
 }
 
 function clientOptions(plugin, onWrite) {

@@ -1,6 +1,8 @@
+import { existsSync } from 'node:fs'
 import fsp from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { FolioError, type FolioRouteHandler } from '@folio/base-contract'
 
 const MIME_BY_EXT: Readonly<Record<string, string>> = {
@@ -13,6 +15,8 @@ const MIME_BY_EXT: Readonly<Record<string, string>> = {
 }
 
 function resolveDefaultTldrawAssetsRoot(): string {
+  const packagedAssets = fileURLToPath(new URL('./tldraw-assets/', import.meta.url))
+  if (existsSync(packagedAssets)) return packagedAssets
   const require = createRequire(import.meta.url)
   const pkgPath = require.resolve('@tldraw/assets/package.json')
   return path.dirname(pkgPath)

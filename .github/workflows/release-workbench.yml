@@ -1,0 +1,48 @@
+name: Release LocalFolio workbench
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run verify
+      - run: pnpm run pack:workbench
+      - name: Verify installation in DSH
+        shell: bash
+        run: |
+          export DSH_HOME="$(mktemp -d)"
+          dsh() { pnpm dlx @deepseek-ai/dsh@0.2.2-rc.5 "$@"; }
+          dsh --profile smoke --from-default-profile web --dump-config > /dev/null
+          dsh plugin --profile smoke add "$PWD/dist/localfolio-workbench.tgz" --offline --ignore-scripts
+          config="$(dsh --profile smoke --dump-config)"
+          for plugin in base-ui-kit workspace-files-ui workspace-canvas-ui workspace-materials-ui workspace-projects-ui; do
+            grep -Fq "@folio/$plugin" <<< "$config"
+          done
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/localfolio-workbench.tgz \
+            --verify-tag --generate-notes --title "LocalFolio $GITHUB_REF_NAME" "${flags[@]}"

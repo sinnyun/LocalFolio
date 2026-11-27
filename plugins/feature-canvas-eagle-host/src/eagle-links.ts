@@ -85,7 +85,8 @@ export function normalizeEagleLocalPath(rawPath: string): string {
     return `${trimmed.toUpperCase()}\\`
   }
 
-  const resolved = path.resolve(trimmed)
+  const pathStyle = path.win32.isAbsolute(trimmed) && !path.posix.isAbsolute(trimmed) ? path.win32 : path
+  const resolved = pathStyle.resolve(trimmed)
   if (/^[a-z]:\\/.test(resolved)) {
     return `${resolved[0].toUpperCase()}${resolved.slice(1)}`
   }
@@ -95,7 +96,8 @@ export function normalizeEagleLocalPath(rawPath: string): string {
 export function extractEagleItemIdFromPath(rawPath: string): string | null {
   const normalized = normalizeEagleLocalPath(rawPath)
   if (!normalized) return null
-  const parentName = path.basename(path.dirname(normalized))
+  const pathStyle = path.isAbsolute(normalized) ? path : path.win32
+  const parentName = pathStyle.basename(pathStyle.dirname(normalized))
   if (!parentName.toLowerCase().endsWith('.info')) return null
   const prefix = parentName.slice(0, -'.info'.length)
   return isValidEagleItemId(prefix) ? prefix : null

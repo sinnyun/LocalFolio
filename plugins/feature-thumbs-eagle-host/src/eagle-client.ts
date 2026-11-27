@@ -1,31 +1,24 @@
 import crypto from 'node:crypto'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { FolioError, type GeneratedThumbMime } from '@folio/base-contract'
+import {
+  FolioError,
+  type EagleLibraryInfo,
+  type FolioEagleService,
+  type FolioFsService,
+  type GeneratedThumbMime,
+} from '@folio/base-contract'
+import {
+  createFolioEagleService,
+  DEFAULT_EAGLE_API_BASE,
+  DEFAULT_EAGLE_PING_TIMEOUT_MS,
+  type FetchLike,
+} from '../../base-eagle-host/src/host.js'
 
-export const DEFAULT_EAGLE_API_BASE = 'http://127.0.0.1:41595'
-export const PROBE_TIMEOUT_MS = 500
+export { DEFAULT_EAGLE_API_BASE, type EagleLibraryInfo, type FetchLike }
+export const PROBE_TIMEOUT_MS = DEFAULT_EAGLE_PING_TIMEOUT_MS
 export const BASE_POLL_TIMEOUT_MS = 10_000
 export const EXTRA_POLL_MS_PER_100MB = 5_000
-
-export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
-
-export interface EagleLibraryInfo {
-  readonly path: string
-  readonly name: string
-}
-
-interface EagleEnvelope<T> {
-  readonly status?: string
-  readonly data?: T
-  readonly message?: string
-}
-
-interface EagleListItem {
-  readonly id?: string
-  readonly name?: string
-  readonly isDeleted?: boolean
-}
 
 export function normalizePathCompare(p: string): string {
   const resolved = path.resolve(p)
@@ -47,7 +40,11 @@ export function decodeEagleThumbPath(raw: string): string {
   }
 }
 
-export function sniffImageMime(buf: Buffer): GeneratedThumbMime {
+export function sniffImageMime(buf: Buffer, fsService?: FolioFsService): GeneratedThumbMime {
+  const detected = fsService?.sniffImageMime(buf)
+  if (detected === 'image/png' || detected === 'image/webp' || detected === 'image/jpeg') {
+    return detected
+  }
   if (
     buf.length >= 12 &&
     buf.toString('ascii', 0, 4) === 'RIFF' &&
@@ -86,41 +83,6 @@ export async function ensureEmptyEagleLibraryDir(libraryPath: string): Promise<v
   }
 }
 
-async function fetchJsonWithTimeout<T>(
-  fetchImpl: FetchLike,
-  url: string,
-  init: RequestInit,
-  timeoutMs: number,
-  externalSignal?: AbortSignal,
-): Promise<T> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  const onExternalAbort = (): void => controller.abort()
-  if (externalSignal) {
-    if (externalSignal.aborted) {
-      clearTimeout(timer)
-      throw new FolioError('aborted', '操作已取消', 499)
-    }
-    externalSignal.addEventListener('abort', onExternalAbort, { once: true })
-  }
-
-  try {
-    const resp = await fetchImpl(url, {
-      ...init,
-      signal: controller.signal,
-    })
-    if (!resp.ok) {
-      throw new FolioError('eagle_http_error', `Eagle API HTTP ${resp.status}`, 502)
-    }
-    return (await resp.json()) as T
-  } finally {
-    clearTimeout(timer)
-    if (externalSignal) {
-      externalSignal.removeEventListener('abort', onExternalAbort)
-    }
-  }
-}
-
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -141,6 +103,8 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 export interface EagleThumbClientOptions {
   readonly apiBase?: string
+  readonly eagle?: FolioEagleService
+  readonly fs?: FolioFsService
   readonly fetchImpl?: FetchLike
   readonly probeTimeoutMs?: number
   readonly pollIntervalMs?: number
@@ -164,41 +128,43 @@ export interface EagleThumbClient {
 
 export function createEagleThumbClient(options: EagleThumbClientOptions = {}): EagleThumbClient {
   const apiBase = (options.apiBase || DEFAULT_EAGLE_API_BASE).replace(/\/+$/, '')
-  const fetchImpl: FetchLike = options.fetchImpl ?? ((url, init) => fetch(url, init))
+  const baseUrlOverride = options.apiBase ? apiBase : undefined
   const probeTimeoutMs = options.probeTimeoutMs ?? PROBE_TIMEOUT_MS
   const pollIntervalMs = options.pollIntervalMs ?? 250
+  const fsService = options.fs
+  const eagle: FolioEagleService =
+    options.eagle ??
+    createFolioEagleService({
+      defaultBaseUrl: apiBase,
+      fetchImpl: options.fetchImpl,
+    })
 
   const probeLibraryInfo = async (signal?: AbortSignal): Promise<EagleLibraryInfo | null> => {
     try {
-      const env = await fetchJsonWithTimeout<
-        EagleEnvelope<{ library?: { path?: string; name?: string } }>
-      >(fetchImpl, `${apiBase}/api/library/info`, { method: 'GET' }, probeTimeoutMs, signal)
-      if (env.status !== 'success' || !env.data?.library?.path) return null
-      return {
-        path: env.data.library.path,
-        name: env.data.library.name ?? path.basename(env.data.library.path),
-      }
+      const info = await eagle.getLibraryInfo(baseUrlOverride, {
+        timeoutMs: probeTimeoutMs,
+        signal,
+      })
+      if (info) return info
+      const alive = await eagle.ping(baseUrlOverride, probeTimeoutMs, signal)
+      if (!alive) return null
+      return await eagle.getLibraryInfo(baseUrlOverride, {
+        timeoutMs: probeTimeoutMs,
+        signal,
+      })
     } catch {
       return null
     }
   }
 
   const switchLibrary = async (targetPath: string, signal?: AbortSignal): Promise<boolean> => {
-    try {
-      await fetchJsonWithTimeout<EagleEnvelope<unknown>>(
-        fetchImpl,
-        `${apiBase}/api/library/switch`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ libraryPath: targetPath }),
-        },
-        4000,
+    const ok = await eagle
+      .switchLibrary(targetPath, baseUrlOverride, {
+        timeoutMs: 4000,
         signal,
-      )
-    } catch {
-      return false
-    }
+      })
+      .catch(() => false)
+    if (!ok) return false
 
     const expectedKey = normalizePathCompare(targetPath)
     const deadline = Date.now() + 8000
@@ -213,16 +179,9 @@ export function createEagleThumbClient(options: EagleThumbClientOptions = {}): E
   }
 
   const moveItemToTrash = async (itemId: string): Promise<void> => {
-    await fetchJsonWithTimeout<EagleEnvelope<unknown>>(
-      fetchImpl,
-      `${apiBase}/api/item/moveToTrash`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ itemIds: [itemId] }),
-      },
-      4000,
-    ).catch(() => {})
+    await eagle
+      .moveItemsToTrash([itemId], baseUrlOverride, { timeoutMs: 4000 })
+      .catch(() => false)
   }
 
   const extractThumbnail: EagleThumbClient['extractThumbnail'] = async opts => {
@@ -251,22 +210,23 @@ export function createEagleThumbClient(options: EagleThumbClientOptions = {}): E
     let createdItemId: string | null = null
 
     try {
-      const addResp = await fetchJsonWithTimeout<EagleEnvelope<unknown>>(
-        fetchImpl,
-        `${apiBase}/api/item/addFromPath`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
+      try {
+        const addedId = await eagle.addItemFromPath(
+          {
             path: opts.filePath,
             name: path.basename(opts.filePath),
             tags: [jobTag],
-          }),
-        },
-        10_000,
-        opts.signal,
-      )
-      if (addResp.status !== 'success') {
+          },
+          baseUrlOverride,
+          { timeoutMs: 10_000, signal: opts.signal },
+        )
+        if (addedId) {
+          createdItemId = addedId
+        }
+      } catch (err) {
+        if (opts.signal?.aborted || (err instanceof FolioError && err.code === 'aborted')) {
+          throw err
+        }
         return null
       }
 
@@ -277,40 +237,36 @@ export function createEagleThumbClient(options: EagleThumbClientOptions = {}): E
         if (opts.signal?.aborted) return null
 
         if (!createdItemId) {
-          const listResp = await fetchJsonWithTimeout<EagleEnvelope<EagleListItem[]>>(
-            fetchImpl,
-            `${apiBase}/api/item/list?tags=${encodeURIComponent(jobTag)}&limit=5`,
-            { method: 'GET' },
-            4000,
-            opts.signal,
-          ).catch(() => null)
-          const match = listResp?.data?.find(it => it.id && !it.isDeleted)
+          const items = await eagle
+            .listItems(
+              { tags: jobTag, limit: 5 },
+              baseUrlOverride,
+              { timeoutMs: 4000, signal: opts.signal },
+            )
+            .catch(() => null)
+          const match = items?.find(it => it.id && !it.isDeleted)
           if (match?.id) {
             createdItemId = match.id
           }
         }
 
         if (createdItemId) {
-          const thumbResp = await fetchJsonWithTimeout<EagleEnvelope<string>>(
-            fetchImpl,
-            `${apiBase}/api/item/thumbnail?id=${encodeURIComponent(createdItemId)}`,
-            { method: 'GET' },
-            4000,
-            opts.signal,
-          ).catch(() => null)
+          const decodedPath = await eagle
+            .getItemThumbnailPath(createdItemId, baseUrlOverride, {
+              timeoutMs: 4000,
+              signal: opts.signal,
+            })
+            .catch(() => null)
 
-          if (thumbResp?.status === 'success' && typeof thumbResp.data === 'string' && thumbResp.data) {
-            const decodedPath = decodeEagleThumbPath(thumbResp.data)
-            if (decodedPath) {
-              const st = await fsp.stat(decodedPath).catch(() => null)
-              if (st && st.isFile() && st.size > 0) {
-                const buffer = await fsp.readFile(decodedPath).catch(() => null)
-                if (buffer && buffer.length > 0) {
-                  return {
-                    buffer,
-                    mime: sniffImageMime(buffer),
-                    previousLibraryPath,
-                  }
+          if (decodedPath) {
+            const st = await fsp.stat(decodedPath).catch(() => null)
+            if (st && st.isFile() && st.size > 0) {
+              const buffer = await fsp.readFile(decodedPath).catch(() => null)
+              if (buffer && buffer.length > 0) {
+                return {
+                  buffer,
+                  mime: sniffImageMime(buffer, fsService),
+                  previousLibraryPath,
                 }
               }
             }

@@ -1,19 +1,35 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
-import { defineAction, type FolioRuntimeService } from '@folio/base-contract'
+import {
+  defineAction,
+  type FolioEagleService,
+  type FolioRuntimeService,
+} from '@folio/base-contract'
+import type { FetchLike } from '../../base-eagle-host/src/host.js'
 import { createEagleLinksService, type EagleLinksService } from './eagle-links.js'
 import type { EaglePathResolveEntry } from './types.js'
 
 export interface RegisterFeatureCanvasEagleHostOptions {
   readonly runtime: FolioRuntimeService
+  readonly eagle?: FolioEagleService
   readonly service?: EagleLinksService
+  readonly fetchImpl?: FetchLike
+  readonly openDeepLinkImpl?: (
+    deepLink: string,
+  ) => Promise<{ readonly strippedElectronRunAsNode?: boolean } | void>
 }
 
 export function registerFeatureCanvasEagleHost(
   options: RegisterFeatureCanvasEagleHostOptions,
 ): () => void {
   const { runtime } = options
-  const service = options.service ?? createEagleLinksService()
+  const service =
+    options.service ??
+    createEagleLinksService({
+      eagle: options.eagle,
+      fetchImpl: options.fetchImpl,
+      openUrlImpl: options.openDeepLinkImpl,
+    })
 
   const disposers = [
     runtime.registerAction(
@@ -82,13 +98,14 @@ export function registerFeatureCanvasEagleHost(
 }
 
 export const name = 'feature-canvas-eagle-host'
-export const inject = ['folioRuntime'] as const
+export const inject = ['folioRuntime', 'folioEagle'] as const
 
 export function apply(ctx: Context): void {
   ctx.effect(
     () =>
       registerFeatureCanvasEagleHost({
         runtime: ctx.folioRuntime,
+        eagle: ctx.folioEagle,
       }),
     'feature-canvas-eagle-host: Eagle link resolution and deep-link open actions',
   )

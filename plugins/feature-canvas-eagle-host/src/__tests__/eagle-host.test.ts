@@ -222,6 +222,83 @@ describe('@folio/feature-canvas-eagle-host', () => {
     await fsp.rm(tmpDir, { recursive: true, force: true })
   })
 
+  it('delegates to injected FolioEagleService when provided', async () => {
+    const stubOpened: string[] = []
+    const stubEagle = {
+      async requestJson() {
+        return null as never
+      },
+      async ping() {
+        return true
+      },
+      async getLibraryInfo() {
+        return null
+      },
+      async switchLibrary() {
+        return true
+      },
+      async getItem(itemId: string) {
+        if (itemId !== 'MUF1LNTTIIFPG') return null
+        return {
+          id: 'MUF1LNTTIIFPG',
+          name: 'WILDWOOD - LAIKA',
+          ext: 'png',
+          size: TINY_PNG.length,
+          folders: ['FLD_CHILD'],
+          isDeleted: false,
+          noThumbnail: false,
+        }
+      },
+      async getFolder(folderId: string) {
+        if (folderId === 'FLD_CHILD') {
+          return { id: 'FLD_CHILD', name: '场景参考', children: [] }
+        }
+        return null
+      },
+      async getItemThumbnailPath(itemId: string) {
+        return itemId === 'MUF1LNTTIIFPG' ? thumbnailPath : null
+      },
+      async addItemFromPath() {
+        return null
+      },
+      async listItems() {
+        return []
+      },
+      async moveItemsToTrash() {
+        return true
+      },
+      async openDeepLink(deepLink: string) {
+        stubOpened.push(deepLink)
+      },
+      extractItemIdFromDeepLink: extractEagleItemIdFromDeepLink,
+    }
+
+    const storage2 = createFolioStorageService({ dataDir: path.join(tmpDir, 'appdata-stub') })
+    const runtime2 = createFolioRuntimeService({ storage: storage2 })
+    const disposeStub = registerFeatureCanvasEagleHost({ runtime: runtime2, eagle: stubEagle })
+
+    try {
+      const resolved = await runtime2.executeAction<{ source: EagleImageSource }>(
+        'canvas.eagle.resolveById',
+        { itemId: 'eagle://item/MUF1LNTTIIFPG' },
+      )
+      expect(resolved.source).toMatchObject({
+        itemId: 'MUF1LNTTIIFPG',
+        name: 'WILDWOOD - LAIKA',
+        folders: [{ id: 'FLD_CHILD', name: '场景参考' }],
+      })
+
+      const openRes = await runtime2.executeAction<EagleOpenItemResult>('canvas.eagle.openItem', {
+        itemId: 'MUF1LNTTIIFPG',
+      })
+      expect(openRes.itemId).toBe('MUF1LNTTIIFPG')
+      expect(stubOpened).toEqual(['eagle://item/MUF1LNTTIIFPG'])
+    } finally {
+      disposeStub()
+      runtime2.dispose()
+    }
+  })
+
   it('validates Eagle item IDs, deep links, and .info paths', () => {
     expect(isValidEagleItemId('MUF1LNTTIIFPG')).toBe(true)
     expect(isValidEagleItemId('MUF1-BAD')).toBe(false)

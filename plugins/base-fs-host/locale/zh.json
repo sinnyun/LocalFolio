@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "基础文件系统能力",
+    "description": "为各工作区提供统一的路径规范化与越界校验、文件分类与图片尺寸解析、驱动器/快捷目录枚举、HTTP Range 媒体流传输与缓存目录 LRU 清理（ctx.folioFs）。",
+    "detail": "./docs/DETAIL.md"
+  }
+}

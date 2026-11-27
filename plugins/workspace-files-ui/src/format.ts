@@ -1,3 +1,6 @@
+import { compareNaturalName } from '@folio/base-collection-ui/client'
+import { TAG_COLOR_PALETTE } from '@folio/base-metadata-ui/client'
+import { categoryLabel, formatBytes, formatDateTime } from '@folio/base-ui-kit/client'
 import type {
   CategoryFilter,
   DirChildGroup,
@@ -10,27 +13,7 @@ import type {
   SortDir,
 } from './types.js'
 
-export const TAG_COLOR_PALETTE = [
-  '#3b82f6',
-  '#10b981',
-  '#f59e0b',
-  '#ef4444',
-  '#8b5cf6',
-  '#ec4899',
-  '#06b6d4',
-  '#64748b',
-] as const
-
-const CATEGORY_LABELS: Readonly<Record<FileCategory, string>> = {
-  folder: '文件夹',
-  image: '图片',
-  video: '视频',
-  audio: '音频',
-  document: '文档',
-  code: '代码',
-  archive: '压缩包',
-  other: '其他',
-}
+export { TAG_COLOR_PALETTE, categoryLabel, formatBytes, formatDateTime }
 
 const CATEGORY_ORDER: readonly FileCategory[] = [
   'folder',
@@ -68,31 +51,6 @@ export function getParentDirLabel(filePath: string): {
       ? parentPath.slice(parentSep + 1)
       : parentPath
   return { parentPath, parentName }
-}
-
-export function categoryLabel(category: FileCategory): string {
-  return CATEGORY_LABELS[category]
-}
-
-export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'] as const
-  let value = bytes
-  let idx = 0
-  while (value >= 1024 && idx < units.length - 1) {
-    value /= 1024
-    idx += 1
-  }
-  const decimals = idx === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2
-  const formatted = decimals === 0 ? String(Math.round(value)) : String(Number(value.toFixed(decimals)))
-  return `${formatted} ${units[idx]}`
-}
-
-export function formatDateTime(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return '—'
-  const d = new Date(ms)
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 export function snapThumbBucket(gridSize: number): number {
@@ -152,7 +110,7 @@ export function sortEntries(
     }
     let cmp = 0
     if (sortBy === 'name') {
-      cmp = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+      cmp = compareNaturalName(a.name, b.name)
     } else if (sortBy === 'mtime') {
       cmp = a.mtimeMs - b.mtimeMs
     } else if (sortBy === 'size') {
@@ -165,7 +123,7 @@ export function sortEntries(
       cmp = ra - rb
     }
     if (cmp !== 0) return cmp * dirFactor
-    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    return compareNaturalName(a.name, b.name)
   })
 }
 
@@ -222,7 +180,7 @@ export function groupEntries(
         }
       }
       return Array.from(byParent.values())
-        .sort((a, b) => a.folderName.localeCompare(b.folderName, undefined, { numeric: true }))
+        .sort((a, b) => compareNaturalName(a.folderName, b.folderName))
         .map(g => {
           const sorted = sortEntries(g.items, sortBy, sortDir, true, metadataMap)
           return {

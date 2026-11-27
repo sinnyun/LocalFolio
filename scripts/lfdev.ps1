@@ -40,6 +40,9 @@ $ErrLog = Join-Path $StateDir "dsh-$Stamp.err.log"
 
 $ExpectedClientPlugins = @(
   '@folio/base-ui-kit',
+  '@folio/base-collection-ui',
+  '@folio/base-tasks-ui',
+  '@folio/base-metadata-ui',
   '@folio/base-shell-ui',
   '@folio/base-settings-ui',
   '@folio/test-overview-ui',

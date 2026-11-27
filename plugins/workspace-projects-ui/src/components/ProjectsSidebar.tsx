@@ -28,9 +28,9 @@ import {
   Skeleton,
   cn,
 } from '@folio/base-ui-kit/client'
+import { useVirtualList } from '@folio/base-collection-ui/client'
 import { useProjects } from '../context.js'
 import { buildProjectCoverUrl, formatBytes } from '../format.js'
-import { useVirtualList } from '../virtual.js'
 import { LazyThumbImage } from './LazyThumbImage.js'
 
 const PROJECT_ROW_HEIGHT = 70

@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Metadata UI primitives",
+    "description": "Shared metadata editing primitives and clipboard helpers across workspaces: star rating input, string and colored tag chip editors, auto-save note field, and clipboard copy with fallback.",
+    "detail": "docs/DETAIL.md"
+  }
+}

@@ -18,10 +18,12 @@
       "immediately": true,
       "inject": [
         "@folio/base-ui-kit",
+        "@folio/base-metadata-ui",
         "@folio/workspace-canvas-ui"
       ],
       "external": [
-        "@folio/base-ui-kit"
+        "@folio/base-ui-kit",
+        "@folio/base-metadata-ui"
       ]
     }
   },
@@ -38,6 +40,7 @@
   "devDependencies": {
     "@folio/base-contract": "workspace:*",
     "@folio/base-ui-kit": "workspace:*",
+    "@folio/base-metadata-ui": "workspace:*",
     "lucide-react": "^0.511.0"
   },
   "engines": {

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="LocalFolio Metadata UI">
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#181c24"/>
+  <path d="M16 20h20l12 12-16 16-16-16V20z" fill="none" stroke="#60a5fa" stroke-width="2.5" stroke-linejoin="round"/>
+  <circle cx="24" cy="28" r="3" fill="#34d399"/>
+  <path d="M44 15l2.2 4.4 4.8.7-3.5 3.4.8 4.8-4.3-2.3-4.3 2.3.8-4.8-3.5-3.4 4.8-.7L44 15z" fill="#fbbf24"/>
+</svg>

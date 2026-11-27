@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { FolioError, type FolioRouteHandler } from '@folio/base-contract'
+import { FolioError, type FolioFsService, type FolioRouteHandler } from '@folio/base-contract'
 import { normalizeLocalPath } from './dialogs.js'
 import type { VectorCraftBridge } from './vectorcraft-bridge.js'
 
@@ -12,6 +12,7 @@ const MAX_CACHE_FILES = 500
 export interface CreateMaterialsPreviewRouteOptions {
   readonly cacheDir: string
   readonly bridge: VectorCraftBridge
+  readonly fs?: FolioFsService
 }
 
 function clampPpi(raw: number): number {
@@ -56,40 +57,18 @@ export function createMaterialsPreviewRouteHandler(
   }
 
   function schedulePrune(): void {
-    if (prunePending) return
+    if (!options.fs || prunePending) return
     prunePending = true
+    const fsService = options.fs
     setTimeout(() => {
       prunePending = false
-      void (async () => {
-        try {
-          const entries = await fsp.readdir(previewDir, { withFileTypes: true })
-          const stats: Array<{ filePath: string; size: number; mtimeMs: number }> = []
-          let totalBytes = 0
-          for (const e of entries) {
-            if (!e.isFile() || !e.name.endsWith('.png')) continue
-            const fp = path.join(previewDir, e.name)
-            try {
-              const st = await fsp.stat(fp)
-              stats.push({ filePath: fp, size: st.size, mtimeMs: st.mtimeMs })
-              totalBytes += st.size
-            } catch {
-              // ignore
-            }
-          }
-          if (stats.length <= MAX_CACHE_FILES && totalBytes <= MAX_CACHE_BYTES) return
-          stats.sort((a, b) => a.mtimeMs - b.mtimeMs)
-          while (
-            stats.length > 0 &&
-            (stats.length > MAX_CACHE_FILES || totalBytes > MAX_CACHE_BYTES)
-          ) {
-            const oldest = stats.shift()!
-            await fsp.unlink(oldest.filePath).catch(() => {})
-            totalBytes -= oldest.size
-          }
-        } catch {
-          // ignore
-        }
-      })()
+      void fsService
+        .pruneCacheDir(previewDir, {
+          maxFiles: MAX_CACHE_FILES,
+          maxBytes: MAX_CACHE_BYTES,
+          extFilter: '.png',
+        })
+        .catch(() => {})
     }, 3000)
   }
 

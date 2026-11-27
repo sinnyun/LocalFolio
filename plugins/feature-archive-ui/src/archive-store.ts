@@ -35,25 +35,7 @@ function setState(patch: Partial<ArchiveUiStoreState>): void {
   emit()
 }
 
-export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let val = bytes
-  let idx = 0
-  while (val >= 1024 && idx < units.length - 1) {
-    val /= 1024
-    idx += 1
-  }
-  const digits = idx === 0 ? 0 : val >= 100 ? 0 : val >= 10 ? 1 : 2
-  return `${val.toFixed(digits)} ${units[idx]}`
-}
-
-export function formatDateTime(ts: number | null | undefined): string {
-  if (!ts || !Number.isFinite(ts) || ts <= 0) return '—'
-  const d = new Date(ts)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
+export { formatBytes, formatDateTime } from '@folio/base-ui-kit/client'
 
 export async function refreshArchiveStatus(): Promise<ArchiveToolStatus | null> {
   setState({ loading: true, error: null })

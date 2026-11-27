@@ -1,16 +1,15 @@
 import * as React from 'react'
 import type { FrameViewProps } from '@folio/base-contract'
+import { StringTagChipsEditor } from '@folio/base-metadata-ui/client'
 import {
   CheckCircle2,
   ExternalLink,
   Eye,
   FolderOpen,
   Image as ImageIcon,
-  Plus,
   RefreshCw,
   Save,
   Sparkles,
-  X,
 } from 'lucide-react'
 import {
   Badge,
@@ -53,7 +52,6 @@ export function ProjectsInspector(_props: FrameViewProps): React.ReactElement {
   const [projectType, setProjectType] = React.useState('')
   const [summary, setSummary] = React.useState('')
   const [tags, setTags] = React.useState<string[]>([])
-  const [newTag, setNewTag] = React.useState('')
   const [saving, setSaving] = React.useState(false)
   const [traceOpen, setTraceOpen] = React.useState(false)
 
@@ -82,15 +80,6 @@ export function ProjectsInspector(_props: FrameViewProps): React.ReactElement {
 
   const isChecking = checkingProjectId === selectedProject.id
   const isSyncing = syncingProjectId === selectedProject.id
-
-  const handleAddTag = (): void => {
-    const clean = newTag.trim()
-    if (!clean) return
-    if (!tags.includes(clean)) {
-      setTags(prev => [...prev, clean])
-    }
-    setNewTag('')
-  }
 
   const handleSaveMeta = async (): Promise<void> => {
     setSaving(true)
@@ -240,38 +229,11 @@ export function ProjectsInspector(_props: FrameViewProps): React.ReactElement {
 
         <div className="flex flex-col gap-1.5">
           <label className="text-[11px] text-muted-foreground">标签</label>
-          <div className="flex flex-wrap gap-1">
-            {tags.map(tag => (
-              <Badge key={tag} variant="secondary" className="gap-1 pr-1 text-[11px]">
-                #{tag}
-                <button
-                  type="button"
-                  onClick={() => setTags(prev => prev.filter(t => t !== tag))}
-                  className="rounded hover:text-destructive"
-                  aria-label={`移除标签 ${tag}`}
-                >
-                  <X size={11} />
-                </button>
-              </Badge>
-            ))}
-          </div>
-          <div className="flex gap-1.5">
-            <Input
-              value={newTag}
-              onChange={e => setNewTag(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  handleAddTag()
-                }
-              }}
-              placeholder="输入新标签…"
-              className="h-7 text-xs"
-            />
-            <Button type="button" size="sm" variant="outline" className="h-7 px-2" onClick={handleAddTag}>
-              <Plus size={13} />
-            </Button>
-          </div>
+          <StringTagChipsEditor
+            tags={tags}
+            onChange={setTags}
+            placeholder="输入新标签…"
+          />
         </div>
 
         {/* AI Smart Extraction */}

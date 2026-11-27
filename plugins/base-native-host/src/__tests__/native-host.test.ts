@@ -49,6 +49,14 @@ describe('@folio/base-native-host', () => {
       status: 404,
     })
 
+    if (process.platform !== 'win32') {
+      expect(await service.pickSaveFile?.({ defaultName: 'test.vectorcraft' })).toEqual({
+        supported: false,
+        cancelled: false,
+        filePath: null,
+      })
+    }
+
     service.dispose()
   })
 

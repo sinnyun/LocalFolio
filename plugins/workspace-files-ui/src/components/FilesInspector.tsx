@@ -2,15 +2,18 @@ import * as React from 'react'
 import type { FrameViewProps } from '@folio/base-contract'
 import { rpcCall } from '@folio/base-contract/rpc'
 import {
+  AutoSaveNoteField,
+  ColoredTagChipsEditor,
+  StarRatingInput,
+  copyTextToClipboard,
+} from '@folio/base-metadata-ui/client'
+import {
   Check,
   Copy,
   ExternalLink,
   FolderOpen,
   Maximize2,
-  Plus,
   Star,
-  Tag,
-  X,
 } from 'lucide-react'
 import {
   Badge,
@@ -20,8 +23,6 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-  FolioInput,
-  FolioTextarea,
   Separator,
   Skeleton,
   cn,
@@ -29,38 +30,12 @@ import {
 } from '@folio/base-ui-kit/client'
 import { useFiles } from '../context.js'
 import {
-  TAG_COLOR_PALETTE,
   categoryLabel,
   formatBytes,
   formatDateTime,
 } from '../format.js'
 import type { FileInspectResult } from '../types.js'
 import { FileCategoryIcon } from './FileIcon.js'
-
-async function copyTextToClipboard(text: string): Promise<boolean> {
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text)
-      return true
-    } catch {
-      // Fall back to execCommand below
-    }
-  }
-  if (typeof document !== 'undefined') {
-    const textarea = document.createElement('textarea')
-    textarea.value = text
-    textarea.style.position = 'fixed'
-    textarea.style.opacity = '0'
-    document.body.appendChild(textarea)
-    textarea.select()
-    try {
-      return document.execCommand('copy')
-    } finally {
-      textarea.remove()
-    }
-  }
-  return false
-}
 
 export function FilesInspector(_props: FrameViewProps): React.ReactElement {
   const {
@@ -88,37 +63,21 @@ export function FilesInspector(_props: FrameViewProps): React.ReactElement {
   const [copied, setCopied] = React.useState(false)
   const [thumbFailed, setThumbFailed] = React.useState(false)
 
-  const [hoverStar, setHoverStar] = React.useState<number>(0)
-  const [tagQuery, setTagQuery] = React.useState('')
-  const [noteDraft, setNoteDraft] = React.useState('')
-  const [noteDirty, setNoteDirty] = React.useState(false)
-
   const targetPath = selectedEntry?.path ?? null
   const currentMeta = targetPath ? getFileMeta(targetPath) : null
   const currentRating = currentMeta?.rating ?? 0
   const currentTagIds = currentMeta?.tagIds ?? []
   const savedNote = currentMeta?.note ?? ''
 
-  const pendingNoteRef = React.useRef<{ path: string; note: string; dirty: boolean } | null>(null)
-  pendingNoteRef.current = targetPath
-    ? { path: targetPath, note: noteDraft, dirty: noteDirty }
-    : null
-
   React.useEffect(() => {
     setCopied(false)
     setThumbFailed(false)
-    setTagQuery('')
-    setHoverStar(0)
     if (!targetPath) {
       setInspect(null)
       setError(null)
       setLoading(false)
-      setNoteDraft('')
-      setNoteDirty(false)
       return
     }
-    setNoteDraft(getFileMeta(targetPath)?.note ?? '')
-    setNoteDirty(false)
 
     const controller = new AbortController()
     setLoading(true)
@@ -139,20 +98,8 @@ export function FilesInspector(_props: FrameViewProps): React.ReactElement {
 
     return () => {
       controller.abort()
-      // Flush dirty note before switching away
-      const pending = pendingNoteRef.current
-      if (pending && pending.dirty && pending.path === targetPath) {
-        void setFileMeta(pending.path, { note: pending.note })
-      }
     }
-  }, [targetPath]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Sync external note changes when not actively dirty
-  React.useEffect(() => {
-    if (!noteDirty && targetPath) {
-      setNoteDraft(savedNote)
-    }
-  }, [savedNote, noteDirty, targetPath])
+  }, [targetPath])
 
   const handleCopyPath = async (value: string): Promise<void> => {
     const ok = await copyTextToClipboard(value)
@@ -165,18 +112,6 @@ export function FilesInspector(_props: FrameViewProps): React.ReactElement {
     }
   }
 
-  const flushNote = (): void => {
-    if (!targetPath || !noteDirty) return
-    setNoteDirty(false)
-    void setFileMeta(targetPath, { note: noteDraft })
-  }
-
-  const handleSetRating = (star: number): void => {
-    if (!targetPath) return
-    const nextRating = currentRating === star ? 0 : star
-    void setFileMeta(targetPath, { rating: nextRating })
-  }
-
   const handleToggleTag = (tagId: string): void => {
     if (!targetPath) return
     const exists = currentTagIds.includes(tagId)
@@ -186,18 +121,13 @@ export function FilesInspector(_props: FrameViewProps): React.ReactElement {
     void setFileMeta(targetPath, { tagIds: nextTagIds })
   }
 
-  const handleQuickCreateTag = async (): Promise<void> => {
-    if (!targetPath) return
-    const trimmed = tagQuery.trim()
-    if (!trimmed) return
-    const color = TAG_COLOR_PALETTE[metadata.tags.length % TAG_COLOR_PALETTE.length]
-    const created = await createTag(trimmed, color)
-    if (created) {
-      setTagQuery('')
-      if (!currentTagIds.includes(created.id)) {
-        await setFileMeta(targetPath, { tagIds: [...currentTagIds, created.id] })
-      }
+  const handleQuickCreateTag = async (name: string, color: string) => {
+    if (!targetPath) return null
+    const created = await createTag(name, color)
+    if (created && !currentTagIds.includes(created.id)) {
+      await setFileMeta(targetPath, { tagIds: [...currentTagIds, created.id] })
     }
+    return null
   }
 
   if (!selectedEntry) {
@@ -250,12 +180,6 @@ export function FilesInspector(_props: FrameViewProps): React.ReactElement {
   const entry = inspect?.entry ?? selectedEntry
   const fullPath = inspect?.resolvedPath ?? entry.path
   const isFav = entry.isDir && isFavoritePath(entry.path)
-  const assignedTags = metadata.tags.filter(t => currentTagIds.includes(t.id))
-  const qLower = tagQuery.trim().toLowerCase()
-  const unassignedTags = metadata.tags.filter(
-    t => !currentTagIds.includes(t.id) && (!qLower || t.name.toLowerCase().includes(qLower)),
-  )
-  const hasExactTagMatch = metadata.tags.some(t => t.name.toLowerCase() === qLower)
 
   return (
     <div data-lf-files-inspector="" className="flex flex-col gap-3 p-3 text-xs">
@@ -409,171 +333,30 @@ export function FilesInspector(_props: FrameViewProps): React.ReactElement {
         {/* 星级评分 */}
         <div className="flex items-center justify-between gap-2">
           <span className="font-medium text-muted-foreground">星级评分</span>
-          <div className="flex items-center gap-1" onMouseLeave={() => setHoverStar(0)}>
-            {[1, 2, 3, 4, 5].map(star => {
-              const filled = star <= (hoverStar || currentRating)
-              return (
-                <button
-                  key={star}
-                  type="button"
-                  data-lf-inspector-star={String(star)}
-                  aria-label={`评分 ${star} 星`}
-                  aria-pressed={currentRating === star}
-                  onMouseEnter={() => setHoverStar(star)}
-                  onClick={() => handleSetRating(star)}
-                  className="rounded p-0.5 transition-transform hover:scale-110"
-                >
-                  <Star
-                    size={15}
-                    className={cn(
-                      filled
-                        ? 'fill-amber-400 text-amber-500'
-                        : 'text-muted-foreground/50 hover:text-amber-400',
-                    )}
-                  />
-                </button>
-              )
-            })}
-            {currentRating > 0 ? (
-              <button
-                type="button"
-                aria-label="清除星级"
-                onClick={() => void setFileMeta(entry.path, { rating: 0 })}
-                className="ml-1 text-[10px] text-muted-foreground hover:text-foreground"
-              >
-                清除
-              </button>
-            ) : null}
-          </div>
+          <StarRatingInput
+            value={currentRating}
+            onChange={nextRating => void setFileMeta(entry.path, { rating: nextRating })}
+          />
         </div>
 
         {/* 标签选择与快速添加 */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-medium text-muted-foreground">标签</span>
-            <button
-              type="button"
-              onClick={() => setTagManagerOpen(true)}
-              className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
-            >
-              <Tag size={11} />
-              <span>管理标签</span>
-            </button>
-          </div>
-
-          {assignedTags.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {assignedTags.map(tag => (
-                <span
-                  key={tag.id}
-                  data-lf-inspector-assigned-tag={tag.id}
-                  className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-foreground"
-                >
-                  <span
-                    className="size-2 rounded-full"
-                    style={{ backgroundColor: tag.color }}
-                  />
-                  <span>{tag.name}</span>
-                  <button
-                    type="button"
-                    data-lf-inspector-tag-remove={tag.id}
-                    aria-label={`移除标签 ${tag.name}`}
-                    onClick={() => handleToggleTag(tag.id)}
-                    className="ml-0.5 rounded-full text-muted-foreground hover:text-destructive"
-                  >
-                    <X size={11} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          ) : null}
-
-          <div className="flex items-center gap-1.5">
-            <FolioInput
-              size="sm"
-              data-lf-inspector-tag-input=""
-              placeholder="搜索或输入新标签…"
-              value={tagQuery}
-              onChange={ev => setTagQuery(ev.target.value)}
-              onKeyDown={ev => {
-                if (ev.key === 'Enter' && tagQuery.trim()) {
-                  ev.preventDefault()
-                  if (unassignedTags.length > 0 && hasExactTagMatch) {
-                    const exact = unassignedTags.find(t => t.name.toLowerCase() === qLower)
-                    if (exact) {
-                      handleToggleTag(exact.id)
-                      setTagQuery('')
-                    }
-                  } else if (!hasExactTagMatch) {
-                    void handleQuickCreateTag()
-                  }
-                }
-              }}
-              className="min-w-0 flex-1"
-            />
-          </div>
-
-          {tagQuery.trim() && !hasExactTagMatch ? (
-            <button
-              type="button"
-              data-lf-inspector-tag-quick-create=""
-              onClick={() => void handleQuickCreateTag()}
-              className="flex w-full items-center gap-1.5 rounded-md border border-dashed border-primary/50 bg-primary/5 px-2 py-1 text-[11px] text-primary hover:bg-primary/10"
-            >
-              <Plus size={12} />
-              <span>创建并添加标签「{tagQuery.trim()}」</span>
-            </button>
-          ) : null}
-
-          {unassignedTags.length > 0 ? (
-            <div className="flex flex-wrap gap-1">
-              {unassignedTags.slice(0, 8).map(tag => (
-                <button
-                  key={tag.id}
-                  type="button"
-                  data-lf-inspector-tag-pick={tag.id}
-                  onClick={() => handleToggleTag(tag.id)}
-                  className="inline-flex items-center gap-1 rounded-full border border-border/80 bg-background px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
-                >
-                  <Plus size={10} />
-                  <span
-                    className="size-2 rounded-full"
-                    style={{ backgroundColor: tag.color }}
-                  />
-                  <span>{tag.name}</span>
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
+        <ColoredTagChipsEditor
+          allTags={metadata.tags}
+          selectedTagIds={currentTagIds}
+          onToggleTag={handleToggleTag}
+          onQuickCreate={handleQuickCreateTag}
+          onManageClick={() => setTagManagerOpen(true)}
+        />
 
         {/* 文件备注 */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-medium text-muted-foreground">文件备注</span>
-            <span className="text-[10px] text-muted-foreground">
-              {noteDirty ? '未保存（失焦或 Ctrl+Enter 保存）' : savedNote ? '已保存' : ''}
-            </span>
-          </div>
-          <FolioTextarea
-            data-lf-inspector-note=""
-            rows={3}
-            placeholder="输入文件备注说明…"
-            value={noteDraft}
-            onChange={ev => {
-              setNoteDraft(ev.target.value)
-              setNoteDirty(true)
-            }}
-            onBlur={flushNote}
-            onKeyDown={ev => {
-              if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
-                ev.preventDefault()
-                flushNote()
-              }
-            }}
-            className="w-full resize-y text-xs"
-          />
-        </div>
+        <AutoSaveNoteField
+          key={entry.path}
+          label="文件备注"
+          placeholder="输入文件备注说明…"
+          value={savedNote}
+          onSave={nextNote => setFileMeta(entry.path, { note: nextNote })}
+          data-lf-inspector-note=""
+        />
       </div>
 
       {error ? (

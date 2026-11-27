@@ -2,6 +2,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
 import {
   defineAction,
+  type FolioFsService,
+  type FolioNativeService,
   type FolioRuntimeService,
   type FolioStorageService,
 } from '@folio/base-contract'
@@ -30,6 +32,8 @@ import {
 export interface RegisterWorkspaceCanvasHostOptions {
   readonly runtime: FolioRuntimeService
   readonly storage: FolioStorageService
+  readonly native?: FolioNativeService
+  readonly fs?: FolioFsService
   readonly proxyProvider?: ImageProxyProvider
   readonly dialogProvider?: CanvasDialogProvider
   readonly tldrawAssetsRoot?: string
@@ -38,10 +42,10 @@ export interface RegisterWorkspaceCanvasHostOptions {
 export function registerWorkspaceCanvasHost(
   options: RegisterWorkspaceCanvasHostOptions,
 ): () => void {
-  const { runtime, storage } = options
+  const { runtime, storage, native, fs } = options
   const ownsProxyProvider = !options.proxyProvider
-  const proxyProvider = options.proxyProvider ?? createWindowsWicImageProxyProvider()
-  const dialogProvider = options.dialogProvider ?? createWindowsDialogProvider()
+  const proxyProvider = options.proxyProvider ?? createWindowsWicImageProxyProvider(native)
+  const dialogProvider = options.dialogProvider ?? createWindowsDialogProvider(native)
 
   const pluginStorage = storage.forPlugin('workspace-canvas-host')
   const boards = createBoardsManager(pluginStorage)
@@ -306,7 +310,7 @@ export function registerWorkspaceCanvasHost(
         title: '获取本地快速文件夹与驱动器列表',
         tier: 'read',
         input: z.object({}).default({}),
-        run: async () => listCanvasRoots(),
+        run: async () => listCanvasRoots(fs),
       }),
     ),
 
@@ -321,7 +325,7 @@ export function registerWorkspaceCanvasHost(
             showHidden: z.boolean().optional(),
           })
           .default({}),
-        run: async input => listCanvasDirectory(input),
+        run: async input => listCanvasDirectory(input, fs),
       }),
     ),
 
@@ -351,6 +355,7 @@ export function registerWorkspaceCanvasHost(
       createCanvasProxyRouteHandler({
         cacheDir: pluginStorage.cacheDir,
         provider: proxyProvider,
+        fs,
       }),
     ),
 
@@ -371,7 +376,7 @@ export function registerWorkspaceCanvasHost(
 }
 
 export const name = 'workspace-canvas-host'
-export const inject = ['folioRuntime', 'folioStorage'] as const
+export const inject = ['folioRuntime', 'folioStorage', 'folioNative', 'folioFs'] as const
 
 export function apply(ctx: Context): void {
   ctx.effect(
@@ -379,6 +384,8 @@ export function apply(ctx: Context): void {
       registerWorkspaceCanvasHost({
         runtime: ctx.folioRuntime,
         storage: ctx.folioStorage,
+        native: ctx.folioNative,
+        fs: ctx.folioFs,
       }),
     'workspace-canvas-host: actions + lod proxy + tldraw assets',
   )
@@ -415,6 +422,6 @@ export {
 } from './image-proxy.js'
 export type { ImageProxyOptions, ImageProxyProvider, ImageProxyResult, LodTier } from './image-proxy.js'
 export { createTldrawAssetRouteHandler } from './tldraw-assets-route.js'
-export { createWindowsDialogProvider, listCanvasDirectory, listCanvasRoots, revealLocalPath } from './win-dialog.js'
+export { createWindowsDialogProvider, listCanvasDirectory, listCanvasRoots } from './win-dialog.js'
 export type { CanvasDialogProvider, PickFolderResult, PickImagesOptions, PickImagesResult } from './win-dialog.js'
 export * from './types.js'

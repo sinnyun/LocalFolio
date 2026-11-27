@@ -6,6 +6,7 @@ import { z } from 'zod'
 import {
   FolioError,
   defineAction,
+  type FolioFsService,
   type FolioNativeService,
   type FolioProjectsHostService,
   type FolioRuntimeService,
@@ -182,6 +183,7 @@ export interface RegisterWorkspaceProjectsHostOptions {
   readonly tasks: FolioTasksService
   readonly native: FolioNativeService
   readonly thumbs: FolioThumbsService
+  readonly fs?: FolioFsService
   readonly workerPath?: string | null
   readonly getLlm?: () => DshLlmLike | undefined
   readonly getDefaultModel?: () => DshDefaultModelLike | undefined
@@ -195,7 +197,7 @@ export interface ManagedWorkspaceProjectsHost {
 export function createWorkspaceProjectsHost(
   options: RegisterWorkspaceProjectsHostOptions,
 ): ManagedWorkspaceProjectsHost {
-  const { runtime, storage, tasks, native, thumbs } = options
+  const { runtime, storage, tasks, native, thumbs, fs: fsService } = options
   const workerPath = options.workerPath !== undefined ? options.workerPath : resolveScannerWorkerPath()
   const readLlm = (): DshLlmLike | undefined => options.getLlm?.()
   const readDefaultModel = (): DshDefaultModelLike | undefined => options.getDefaultModel?.()
@@ -210,8 +212,8 @@ export function createWorkspaceProjectsHost(
       projects: [],
     }),
   )
-  const metaStore = createProjectMetaStore(pluginStorage, native)
-  const thumbService = createProjectThumbService({ metaStore, thumbs })
+  const metaStore = createProjectMetaStore(pluginStorage, native, fsService)
+  const thumbService = createProjectThumbService({ metaStore, thumbs, fs: fsService })
   const fileResolvers = new Map<string, ProjectFileResolver>()
 
   const getSortedResolvers = (): ProjectFileResolver[] =>
@@ -1259,6 +1261,7 @@ export function createWorkspaceProjectsHost(
       'GET',
       '/projects/thumb',
       createProjectThumbRouteHandler({
+        fs: fsService,
         resolveProjectSummary: resolveProjectById,
         resolveProjectManifest: (p, id) => metaStore.readManifest(p, id),
         thumbService,
@@ -1270,6 +1273,7 @@ export function createWorkspaceProjectsHost(
       'GET',
       '/projects/media',
       createProjectMediaRouteHandler({
+        fs: fsService,
         resolveProjectPath: async id => (await resolveProjectById(id))?.path ?? null,
         resolveMediaFilePath: async (projectId, relPath, signal) => {
           const summary = await resolveProjectById(projectId)
@@ -1578,6 +1582,7 @@ export const inject = [
   'folioTasks',
   'folioNative',
   'folioThumbs',
+  'folioFs',
 ] as const
 
 export function apply(ctx: Context): void {
@@ -1588,6 +1593,7 @@ export function apply(ctx: Context): void {
       tasks: ctx.folioTasks,
       native: ctx.folioNative,
       thumbs: ctx.folioThumbs,
+      fs: ctx.folioFs,
       getLlm: () =>
         (ctx as unknown as { get?: (k: string) => unknown }).get?.('llm') as
           | DshLlmLike

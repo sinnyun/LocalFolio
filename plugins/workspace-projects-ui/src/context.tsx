@@ -1,4 +1,8 @@
 import * as React from 'react'
+import {
+  type LightboxState,
+  useLightboxState,
+} from '@folio/base-collection-ui/client'
 import type {
   FolioInteractionsService,
   FolioProjectsUiService,
@@ -8,8 +12,9 @@ import type {
   ProjectsUiFileInfo,
   TaskSnapshot,
 } from '@folio/base-contract'
-import { rpcCall, useActionQuery, useFolioTopic } from '@folio/base-contract/rpc'
-import type { LightboxItem } from '@folio/base-ui-kit/client'
+import { rpcCall, useActionQuery } from '@folio/base-contract/rpc'
+import { copyTextToClipboard } from '@folio/base-metadata-ui/client'
+import { useFolioTasks } from '@folio/base-tasks-ui/client'
 import { useProjectsExtensions } from './extension-registry.js'
 import { buildProjectMediaUrl } from './format.js'
 import type {
@@ -60,13 +65,10 @@ export interface ProjectsContextValue {
   readonly selectedProjectIds: ReadonlySet<string>
   readonly tasks: readonly TaskSnapshot[]
   readonly activeTask: TaskSnapshot | null
+  readonly recentFinishedTask: TaskSnapshot | null
   readonly extensions: readonly ProjectsUiExtension[]
   readonly extensionContext: ProjectsUiExtensionContext
-  readonly lightbox: {
-    readonly open: boolean
-    readonly items: readonly LightboxItem[]
-    readonly index: number
-  }
+  readonly lightbox: LightboxState
   setActiveLibraryId(libraryId: string): void
   selectProject(projectId: string | null): void
   selectFile(file: ProjectFileEntry | null): void
@@ -186,12 +188,12 @@ export function ProjectsProvider({
   const [batchMode, setBatchMode] = React.useState(false)
   const [selectedProjectIds, setSelectedProjectIds] = React.useState<Set<string>>(() => new Set())
 
-  const [tasks, setTasks] = React.useState<TaskSnapshot[]>([])
-  const [lightbox, setLightbox] = React.useState<{
-    readonly open: boolean
-    readonly items: readonly LightboxItem[]
-    readonly index: number
-  }>({ open: false, items: [], index: 0 })
+  const {
+    lightbox,
+    openLightboxForItem,
+    setLightboxOpen,
+    setLightboxIndex,
+  } = useLightboxState()
 
   // Keep activeLibraryId valid as libraries load/change
   React.useEffect(() => {
@@ -284,52 +286,26 @@ export function ProjectsProvider({
     void loadProjectDetail(selectedProjectId)
   }, [selectedProjectId, loadProjectDetail])
 
-  // Initial load of tasks + live SSE subscription for tasks:projects
-  React.useEffect(() => {
-    let active = true
-    void rpcCall<{ tasks: TaskSnapshot[] }>('tasks.list', { scope: 'projects' })
-      .then(res => {
-        if (active && Array.isArray(res.tasks)) setTasks(res.tasks)
-      })
-      .catch(() => {})
-    return () => {
-      active = false
-    }
-  }, [])
-
-  useFolioTopic<TaskSnapshot>('tasks:projects', snap => {
-    setTasks(prev => {
-      const idx = prev.findIndex(t => t.id === snap.id)
-      if (idx >= 0) {
-        const next = [...prev]
-        next[idx] = snap
-        return next
+  const {
+    tasks,
+    activeTask,
+    recentFinishedTask,
+    trackTask,
+    pauseTask,
+    resumeTask,
+    cancelTask,
+    clearFinishedTasks,
+  } = useFolioTasks({
+    scopes: ['projects', 'thumbs-eagle'],
+    onTaskCompleted: snap => {
+      if (snap.queue !== 'projects-scan' && snap.queue !== 'projects-ai') {
+        void indexQuery.refetch()
+        if (selectedProjectId) {
+          void loadProjectDetail(selectedProjectId).catch(() => {})
+        }
       }
-      return [snap, ...prev]
-    })
-    if (snap.status === 'completed' && snap.queue !== 'projects-scan' && snap.queue !== 'projects-ai') {
-      void indexQuery.refetch()
-      if (selectedProjectId) {
-        void loadProjectDetail(selectedProjectId).catch(() => {})
-      }
-    }
+    },
   })
-
-  useFolioTopic<{ scope: string }>('tasks:cleared', payload => {
-    if (payload?.scope === 'projects' || payload?.scope === '*') {
-      setTasks(prev =>
-        prev.filter(t => !['completed', 'failed', 'cancelled'].includes(t.status)),
-      )
-    }
-  })
-
-  const activeTask = React.useMemo(
-    () =>
-      tasks.find(t => t.status === 'running' || t.status === 'paused' || t.status === 'queued') ??
-      tasks[0] ??
-      null,
-    [tasks],
-  )
 
   const addLibraryByPath = React.useCallback(
     async (rootPath: string, name?: string): Promise<boolean> => {
@@ -339,7 +315,7 @@ export function ProjectsProvider({
           { rootPath, name },
         )
         setActiveLibraryId(res.library.id)
-        setTasks(prev => [res.task, ...prev.filter(t => t.id !== res.task.id)])
+        trackTask(res.task)
         await indexQuery.refetch()
         notify(`已添加项目库「${res.library.name}」，后台扫描中…`)
         return true
@@ -348,7 +324,7 @@ export function ProjectsProvider({
         return false
       }
     },
-    [indexQuery, notify],
+    [indexQuery, notify, trackTask],
   )
 
   const pickAndAddLibrary = React.useCallback(async () => {
@@ -378,13 +354,13 @@ export function ProjectsProvider({
           'projects.libraries.rescan',
           { libraryId: targetId },
         )
-        setTasks(prev => [res.task, ...prev.filter(t => t.id !== res.task.id)])
+        trackTask(res.task)
         notify(`已启动「${res.library.name}」变更扫描`)
       } catch (err) {
         notify(err instanceof Error ? err.message : '启动扫描失败', false)
       }
     },
-    [activeLibraryId, notify],
+    [activeLibraryId, notify, trackTask],
   )
 
   const removeLibrary = React.useCallback(
@@ -512,27 +488,26 @@ export function ProjectsProvider({
       const imageFiles = projectManifest.groups
         .flatMap(g => g.files)
         .filter(f => f.category === 'image')
-      const idx = Math.max(
-        0,
-        imageFiles.findIndex(f => f.relPath === file.relPath),
+      openLightboxForItem(
+        imageFiles,
+        file,
+        img => ({
+          src: buildProjectMediaUrl(selectedProjectId, img.relPath),
+          alt: img.name,
+          caption: img.relPath,
+        }),
+        (a, b) => a.relPath === b.relPath,
       )
-      const items: LightboxItem[] = imageFiles.map(img => ({
-        src: buildProjectMediaUrl(selectedProjectId, img.relPath),
-        alt: img.name,
-        title: img.relPath,
-      }))
-      if (items.length === 0) return
-      setLightbox({ open: true, items, index: idx })
     },
-    [selectedProjectId, projectManifest],
+    [selectedProjectId, projectManifest, openLightboxForItem],
   )
 
   const copyText = React.useCallback(
     async (text: string, label: string) => {
-      try {
-        await navigator.clipboard?.writeText(text)
+      const ok = await copyTextToClipboard(text)
+      if (ok) {
         notify(`已复制${label}`)
-      } catch {
+      } else {
         notify(`复制${label}失败`, false)
       }
     },
@@ -607,14 +582,13 @@ export function ProjectsProvider({
           notify('没有符合条件的待提取项目')
           return
         }
-        const task = res.task
-        setTasks(prev => [task, ...prev.filter(t => t.id !== task.id)])
+        trackTask(res.task)
         notify(`已加入 AI 批量提取队列（共 ${res.total} 个项目）`)
       } catch (err) {
         notify(err instanceof Error ? err.message : '启动 AI 批量提取失败', false)
       }
     },
-    [aiApplyCover, notify],
+    [aiApplyCover, notify, trackTask],
   )
 
   const batchTagProjects = React.useCallback(
@@ -665,14 +639,13 @@ export function ProjectsProvider({
           notify('没有需要增量更新的项目')
           return
         }
-        const task = res.task
-        setTasks(prev => [task, ...prev.filter(t => t.id !== task.id)])
+        trackTask(res.task)
         notify(`已启动批量增量更新（${res.total} 个项目）`)
       } catch (err) {
         notify(err instanceof Error ? err.message : '启动批量同步失败', false)
       }
     },
-    [notify],
+    [notify, trackTask],
   )
 
   const toggleBatchMode = React.useCallback(() => {
@@ -699,9 +672,12 @@ export function ProjectsProvider({
     setSelectedProjectIds(new Set())
   }, [])
 
-  const onTaskEnqueued = React.useCallback((task: TaskSnapshot) => {
-    setTasks(prev => [task, ...prev.filter(t => t.id !== task.id)])
-  }, [])
+  const onTaskEnqueued = React.useCallback(
+    (task: TaskSnapshot) => {
+      trackTask(task)
+    },
+    [trackTask],
+  )
 
   const refreshSelectedProject = React.useCallback(async () => {
     if (!selectedProjectId) return
@@ -925,26 +901,6 @@ export function ProjectsProvider({
     [projectManifest],
   )
 
-  const pauseTask = React.useCallback(async (taskId: string) => {
-    const snap = await rpcCall<TaskSnapshot>('tasks.pause', { id: taskId })
-    setTasks(prev => prev.map(t => (t.id === snap.id ? snap : t)))
-  }, [])
-
-  const resumeTask = React.useCallback(async (taskId: string) => {
-    const snap = await rpcCall<TaskSnapshot>('tasks.resume', { id: taskId })
-    setTasks(prev => prev.map(t => (t.id === snap.id ? snap : t)))
-  }, [])
-
-  const cancelTask = React.useCallback(async (taskId: string) => {
-    const snap = await rpcCall<TaskSnapshot>('tasks.cancel', { id: taskId })
-    setTasks(prev => prev.map(t => (t.id === snap.id ? snap : t)))
-  }, [])
-
-  const clearFinishedTasks = React.useCallback(async () => {
-    await rpcCall('tasks.clear', { scope: 'projects' })
-    setTasks(prev => prev.filter(t => !['completed', 'failed', 'cancelled'].includes(t.status)))
-  }, [])
-
   const value: ProjectsContextValue = {
     indexLoading: indexQuery.isLoading,
     indexError: indexQuery.error?.message ?? null,
@@ -977,6 +933,7 @@ export function ProjectsProvider({
     selectedProjectIds,
     tasks,
     activeTask,
+    recentFinishedTask,
     extensions,
     extensionContext,
     lightbox,
@@ -1003,8 +960,8 @@ export function ProjectsProvider({
     openFile,
     revealPath,
     openLightboxForFile,
-    setLightboxOpen: open => setLightbox(prev => ({ ...prev, open })),
-    setLightboxIndex: index => setLightbox(prev => ({ ...prev, index })),
+    setLightboxOpen,
+    setLightboxIndex,
     setAiApplyCover,
     previewSelectedAiSample,
     extractSelectedWithAi,
@@ -1020,7 +977,7 @@ export function ProjectsProvider({
     pauseTask,
     resumeTask,
     cancelTask,
-    clearFinishedTasks,
+    clearFinishedTasks: () => clearFinishedTasks(),
     refreshIndex: indexQuery.refetch,
   }
 

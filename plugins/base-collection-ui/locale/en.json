@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Collection UI primitives",
+    "description": "Shared collection browsing primitives across workspaces: virtual list, collapsible grouped virtual grid with sticky headers, natural-name filter/sort helpers, controlled lightbox state, and local file/folder picker dialog.",
+    "detail": "docs/DETAIL.md"
+  }
+}

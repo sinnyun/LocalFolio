@@ -9,6 +9,8 @@ import {
   type NativePickFilesResult,
   type NativePickFolderOptions,
   type NativePickFolderResult,
+  type NativePickSaveFileOptions,
+  type NativePickSaveFileResult,
 } from '@folio/base-contract'
 
 const execFileAsync = promisify(execFile)
@@ -205,6 +207,73 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     }
   } catch {
     return { supported: false, cancelled: false, paths: [] }
+  }
+}
+
+export async function pickNativeSaveFile(
+  options: NativePickSaveFileOptions = {},
+): Promise<NativePickSaveFileResult> {
+  if (process.platform !== 'win32') {
+    return { supported: false, cancelled: false, filePath: null }
+  }
+
+  const initialDir = options.initialDir ? normalizeLocalPath(options.initialDir) : ''
+  const initialDirB64 = Buffer.from(initialDir, 'utf8').toString('base64')
+  const titleB64 = Buffer.from(options.title?.trim() || '保存文件', 'utf8').toString('base64')
+  const filterB64 = Buffer.from(
+    options.filter?.trim() || '所有文件 (*.*)|*.*',
+    'utf8',
+  ).toString('base64')
+  const defaultExtB64 = Buffer.from(options.defaultExt?.trim() || '', 'utf8').toString('base64')
+  const defaultNameB64 = Buffer.from(options.defaultName?.trim() || '', 'utf8').toString('base64')
+
+  const script = `
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Application]::EnableVisualStyles()
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+$owner.StartPosition = 'Manual'
+$owner.Size = New-Object System.Drawing.Size(1, 1)
+$owner.Location = New-Object System.Drawing.Point(-32000, -32000)
+$owner.ShowInTaskbar = $false
+$dlg = New-Object System.Windows.Forms.SaveFileDialog
+$dlg.Title = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${titleB64}'))
+$dlg.Filter = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${filterB64}'))
+$defExt = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${defaultExtB64}'))
+if ($defExt) {
+  $dlg.DefaultExt = $defExt
+  $dlg.AddExtension = $true
+}
+$defName = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${defaultNameB64}'))
+if ($defName) {
+  $dlg.FileName = $defName
+}
+$initDir = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${initialDirB64}'))
+if ($initDir -and (Test-Path -LiteralPath $initDir)) {
+  $dlg.InitialDirectory = $initDir
+}
+$result = $dlg.ShowDialog($owner)
+$owner.Dispose()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK -and $dlg.FileName) {
+  $payload = @{ cancelled = $false; filePath = $dlg.FileName }
+} else {
+  $payload = @{ cancelled = $true; filePath = $null }
+}
+[Console]::Out.WriteLine(($payload | ConvertTo-Json -Compress))
+`
+
+  try {
+    const raw = await runPowerShellSta(script)
+    const parsed = JSON.parse(raw) as { cancelled?: boolean; filePath?: string | null }
+    return {
+      supported: true,
+      cancelled: Boolean(parsed.cancelled),
+      filePath: parsed.filePath ? normalizeLocalPath(parsed.filePath) : null,
+    }
+  } catch {
+    return { supported: false, cancelled: false, filePath: null }
   }
 }
 

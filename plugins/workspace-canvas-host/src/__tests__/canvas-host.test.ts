@@ -2,6 +2,8 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { createFolioFsService } from '../../../base-fs-host/src/host.js'
+import { createFolioNativeService } from '../../../base-native-host/src/host.js'
 import {
   createFolioRuntimeService,
   type ManagedFolioRuntime,
@@ -87,6 +89,7 @@ describe('@folio/workspace-canvas-host', () => {
     disposeCanvas = registerWorkspaceCanvasHost({
       runtime,
       storage,
+      fs: createFolioFsService(),
       proxyProvider: stubProxyProvider,
       dialogProvider: stubDialogProvider,
       tldrawAssetsRoot: assetsRoot,
@@ -455,7 +458,8 @@ describe('@folio/workspace-canvas-host', () => {
     async () => {
       const specialPath = path.join(sampleRoot, '测试 #1 100%.png')
       await fsp.writeFile(specialPath, TINY_PNG)
-      const provider = createWindowsWicImageProxyProvider()
+      const native = createFolioNativeService()
+      const provider = createWindowsWicImageProxyProvider(native)
       try {
         const pngRes = await provider.renderProxy(specialPath, 512, { preferPng: true })
         expect(pngRes).not.toBeNull()
@@ -468,6 +472,7 @@ describe('@folio/workspace-canvas-host', () => {
         expect(jpgRes?.buffer.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]))
       } finally {
         provider.dispose()
+        native.dispose()
       }
     },
     15_000,

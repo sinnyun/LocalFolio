@@ -1,9 +1,9 @@
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { Readable } from 'node:stream'
 import {
   FolioError,
+  type FolioFsService,
   type FolioRouteHandler,
   type FolioThumbsService,
   type GeneratedThumbMime,
@@ -11,10 +11,8 @@ import {
 import {
   buildCoverFileName,
   buildReadableThumbRelPath,
-  classifyProjectFile,
   isAlphaThumbExt,
   isPathInside,
-  isStreamableMediaExt,
   normalizeProjectPath,
 } from './classify.js'
 import type { ProjectMetaStore } from './meta-store.js'
@@ -22,30 +20,22 @@ import type { ProjectFileEntry, ProjectManifest, ProjectSummary } from './types.
 
 export const THUMB_MAX_DIM = 360
 
-const MAX_IMAGE_STREAM_BYTES = 50 * 1024 * 1024
-
 export interface RenderedThumb {
   readonly buffer: Buffer
   readonly mime: GeneratedThumbMime
   readonly fileName: string
 }
 
-function sniffImageMime(buf: Buffer): 'image/jpeg' | 'image/png' | 'image/webp' {
-  if (
-    buf.length >= 4 &&
-    buf[0] === 0x89 &&
-    buf[1] === 0x50 &&
-    buf[2] === 0x4e &&
-    buf[3] === 0x47
-  ) {
-    return 'image/png'
+function resolveThumbMime(
+  buf: Buffer,
+  fsService?: FolioFsService,
+): 'image/jpeg' | 'image/png' | 'image/webp' {
+  const detected = fsService?.sniffImageMime(buf)
+  if (detected === 'image/png' || detected === 'image/webp' || detected === 'image/jpeg') {
+    return detected
   }
-  if (
-    buf.length >= 12 &&
-    buf.toString('ascii', 0, 4) === 'RIFF' &&
-    buf.toString('ascii', 8, 12) === 'WEBP'
-  ) {
-    return 'image/webp'
+  if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    return 'image/png'
   }
   return 'image/jpeg'
 }
@@ -101,8 +91,9 @@ export interface ProjectThumbService {
 export function createProjectThumbService(options: {
   readonly metaStore: ProjectMetaStore
   readonly thumbs: FolioThumbsService
+  readonly fs?: FolioFsService
 }): ProjectThumbService {
-  const { metaStore, thumbs } = options
+  const { metaStore, thumbs, fs: fsService } = options
   const inflight = new Map<string, Promise<RenderedThumb | null>>()
 
   const readCachedThumb = async (
@@ -216,7 +207,7 @@ export function createProjectThumbService(options: {
       if (existing) {
         return {
           buffer: existing.buffer,
-          mime: sniffImageMime(existing.buffer),
+          mime: resolveThumbMime(existing.buffer, fsService),
           fileName: coverFileName,
         }
       }
@@ -270,7 +261,7 @@ export function createProjectThumbService(options: {
       const prevHit = await metaStore.findCoverFile(projectPath, projectId, previousCoverFileName)
       if (prevHit) {
         buffer = prevHit.buffer
-        mime = sniffImageMime(prevHit.buffer)
+        mime = resolveThumbMime(prevHit.buffer, fsService)
       }
     }
 
@@ -334,6 +325,7 @@ export function createProjectThumbService(options: {
 }
 
 export function createProjectThumbRouteHandler(options: {
+  readonly fs?: FolioFsService
   readonly resolveProjectSummary: (projectId: string) => Promise<ProjectSummary | null>
   readonly resolveProjectManifest: (
     projectPath: string,
@@ -346,7 +338,6 @@ export function createProjectThumbRouteHandler(options: {
     const url = new URL(request.url)
     const projectId = url.searchParams.get('projectId')?.trim()
     const kind = url.searchParams.get('kind')?.trim()
-
     if (!projectId) {
       throw new FolioError('invalid_params', '缺少 projectId 参数', 400)
     }
@@ -372,7 +363,7 @@ export function createProjectThumbRouteHandler(options: {
       const coverFileName = buildCoverFileName(summary.name)
       const hit = await options.metaStore.findCoverFile(summary.path, projectId, coverFileName)
       let buffer = hit?.buffer ?? null
-      let mime: GeneratedThumbMime = buffer ? sniffImageMime(buffer) : 'image/jpeg'
+      let mime: GeneratedThumbMime = buffer ? resolveThumbMime(buffer, options.fs) : 'image/jpeg'
 
       if (!buffer) {
         const manifest = await options.resolveProjectManifest(summary.path, projectId)
@@ -467,6 +458,7 @@ export function createProjectThumbRouteHandler(options: {
 }
 
 export function createProjectMediaRouteHandler(options: {
+  readonly fs?: FolioFsService
   readonly resolveProjectPath: (projectId: string) => Promise<string | null>
   readonly resolveMediaFilePath?: (
     projectId: string,
@@ -475,6 +467,9 @@ export function createProjectMediaRouteHandler(options: {
   ) => Promise<string | null>
 }): FolioRouteHandler {
   return async (request: Request): Promise<Response> => {
+    if (!options.fs) {
+      throw new FolioError('fs_unavailable', '基础文件系统服务未就绪', 503)
+    }
     const url = new URL(request.url)
     const projectId = url.searchParams.get('projectId')?.trim()
     const relPath = url.searchParams.get('relPath')?.trim()
@@ -515,75 +510,7 @@ export function createProjectMediaRouteHandler(options: {
     if (!st) {
       throw new FolioError('not_found', `文件不存在: ${relPath}`, 404)
     }
-    if (!st.isFile()) {
-      throw new FolioError('not_a_file', '只能读取普通文件', 400)
-    }
 
-    const meta = classifyProjectFile(path.basename(absPath))
-    if (!isStreamableMediaExt(meta.ext)) {
-      throw new FolioError('unsupported_media', `不支持预览该媒体类型: ${meta.ext}`, 415)
-    }
-    if (meta.category === 'image' && st.size > MAX_IMAGE_STREAM_BYTES) {
-      throw new FolioError('payload_too_large', '图片体积超出 50MB 预览上限', 413)
-    }
-
-    const etag = `"pm-${st.size}-${Math.trunc(st.mtimeMs)}"`
-    if (request.headers.get('if-none-match') === etag) {
-      return new Response(null, {
-        status: 304,
-        headers: { etag, 'cache-control': 'private, max-age=300' },
-      })
-    }
-
-    const baseHeaders: Record<string, string> = {
-      'content-type': meta.mime,
-      'accept-ranges': 'bytes',
-      etag,
-      'cache-control': 'private, max-age=300',
-      'x-content-type-options': 'nosniff',
-    }
-    if (meta.ext === '.svg') {
-      baseHeaders['content-security-policy'] = 'sandbox'
-    }
-
-    if (request.method.toUpperCase() === 'HEAD') {
-      baseHeaders['content-length'] = String(st.size)
-      return new Response(null, { status: 200, headers: baseHeaders })
-    }
-
-    const rangeHeader = request.headers.get('range')
-    if (rangeHeader && st.size > 0) {
-      const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim())
-      if (!match) {
-        return new Response(null, {
-          status: 416,
-          headers: { 'content-range': `bytes */${st.size}` },
-        })
-      }
-      const start = match[1] ? Number(match[1]) : 0
-      const end = match[2] ? Math.min(st.size - 1, Number(match[2])) : st.size - 1
-      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= st.size) {
-        return new Response(null, {
-          status: 416,
-          headers: { 'content-range': `bytes */${st.size}` },
-        })
-      }
-      const chunkSize = end - start + 1
-      const stream = fs.createReadStream(resolvedPath, { start, end })
-      const webStream = Readable.toWeb(stream) as ReadableStream<Uint8Array>
-      return new Response(webStream, {
-        status: 206,
-        headers: {
-          ...baseHeaders,
-          'content-range': `bytes ${start}-${end}/${st.size}`,
-          'content-length': String(chunkSize),
-        },
-      })
-    }
-
-    baseHeaders['content-length'] = String(st.size)
-    const stream = fs.createReadStream(resolvedPath)
-    const webStream = Readable.toWeb(stream) as ReadableStream<Uint8Array>
-    return new Response(webStream, { status: 200, headers: baseHeaders })
+    return options.fs.serveMediaFile(request, resolvedPath, { etagPrefix: 'pm' })
   }
 }

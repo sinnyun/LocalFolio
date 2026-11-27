@@ -100,7 +100,12 @@ LocalFolio/
 │   ├── base-runtime-host/          @folio/base-runtime-host   基础运行时：ctx.folioRuntime（/lf/* RPC + SSE、动作表、清单）
 │   ├── base-tasks-host/            @folio/base-tasks-host     基础后台任务：ctx.folioTasks（有界并发队列、Worker 线程、SSE 进度）
 │   ├── base-native-host/           @folio/base-native-host    基础桌面能力：ctx.folioNative（共享 Shell/WIC 缩略图池、原生弹窗/打开）
+│   ├── base-fs-host/               @folio/base-fs-host        基础文件系统：ctx.folioFs（路径规范化、分类、驱动器/目录枚举、Range 媒体流、缓存清理、原子写）
+│   ├── base-eagle-host/            @folio/base-eagle-host     基础 Eagle 集成：ctx.folioEagle（本地 Web API 客户端、缩略图查询、eagle:// 深链接）
 │   ├── base-ui-kit/                @folio/base-ui-kit         基础 UI 组件库：ctx.folioUi、Radix/lucide、.lf-* 样式、Portal/Toast
+│   ├── base-collection-ui/         @folio/base-collection-ui  基础集合视图：虚拟列表、吸顶分组卡片网格、灯箱状态机、本地文件选择弹窗
+│   ├── base-tasks-ui/              @folio/base-tasks-ui       基础后台任务 UI：多 scope SSE 进度订阅与通用状态栏进度条
+│   ├── base-metadata-ui/           @folio/base-metadata-ui    基础元数据编辑 UI：剪贴板复制、星级评分、标签芯片、自动保存备注
 │   ├── base-shell-ui/              @folio/base-shell-ui       基础外壳：ctx.folioShell（两层工作台 + 工作区栏 + 悬浮面板）
 │   ├── base-frame-ui/              @folio/base-frame-ui       基础布局框架：ctx.folioFrame（四区布局，自身不画界面）
 │   ├── base-settings-ui/           @folio/base-settings-ui    基础设置页：DSH 设置「我的插件」

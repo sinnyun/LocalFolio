@@ -19,6 +19,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  formatBytes,
 } from '@folio/base-ui-kit/client'
 
 const LARGE_SINGLE_FILE_BYTES = 500 * 1024 * 1024 // 500 MB
@@ -64,18 +65,6 @@ interface EagleStatusResult {
   readonly spaceThresholdBytes: number
   readonly spaceWarning: boolean
   readonly busy: boolean
-}
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let val = bytes
-  let idx = 0
-  while (val >= 1024 && idx < units.length - 1) {
-    val /= 1024
-    idx += 1
-  }
-  return `${val >= 100 || idx === 0 ? val.toFixed(0) : val.toFixed(1)} ${units[idx]}`
 }
 
 export function MissingThumbsToolbarControl({

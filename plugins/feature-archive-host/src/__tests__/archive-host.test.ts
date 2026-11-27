@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { FolioNativeService, NativeImageProxyResult } from '@folio/base-contract'
+import { createFolioFsService } from '../../../base-fs-host/src/host.js'
 import { createFolioRuntimeService } from '../../../base-runtime-host/src/host.js'
 import { createFolioStorageService } from '../../../base-storage-host/src/host.js'
 import { registerBaseTasksHost } from '../../../base-tasks-host/src/host.js'
@@ -179,6 +180,7 @@ describe('@folio/feature-archive-host', () => {
       tasks: tasksHost.service,
       native,
       thumbs,
+      fs: createFolioFsService(),
       workerPath: null,
     })
     const archiveHost = registerFeatureArchiveHost({

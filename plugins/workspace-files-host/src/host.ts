@@ -5,6 +5,7 @@ import { z } from 'zod'
 import {
   FolioError,
   defineAction,
+  type FolioFsService,
   type FolioNativeService,
   type FolioRuntimeService,
   type FolioStorageService,
@@ -13,7 +14,7 @@ import {
 import { normalizeBrowsePath } from './classify.js'
 import { listDrives, listQuickFolders } from './drives.js'
 import { createDefaultFavoritesState, createFavoritesManager } from './favorites.js'
-import { inspectFile, listDirectory, listTreeChildren, revealInExplorer } from './fs-ops.js'
+import { inspectFile, listDirectory, listTreeChildren } from './fs-ops.js'
 import {
   createDownloadRouteHandler,
   createMediaRouteHandler,
@@ -26,17 +27,18 @@ import { createWindowsShellThumbProvider, type ShellThumbProvider } from './win-
 export interface RegisterWorkspaceFilesHostOptions {
   readonly runtime: FolioRuntimeService
   readonly storage: FolioStorageService
+  readonly fs?: FolioFsService
   readonly thumbs?: FolioThumbsService
   readonly native?: FolioNativeService
   readonly thumbProvider?: ShellThumbProvider
 }
 
 export function registerWorkspaceFilesHost(options: RegisterWorkspaceFilesHostOptions): () => void {
-  const { runtime, storage, thumbs, native } = options
+  const { runtime, storage, fs: fsService, thumbs, native } = options
   const usesSharedServices = Boolean(thumbs || native)
   const ownsThumbProvider = !options.thumbProvider && !usesSharedServices
   const thumbProvider =
-    options.thumbProvider ?? (usesSharedServices ? undefined : createWindowsShellThumbProvider())
+    options.thumbProvider ?? (usesSharedServices ? undefined : createWindowsShellThumbProvider(native))
 
   const pluginStorage = storage.forPlugin('workspace-files-host')
   const prefsStore = pluginStorage.jsonStore('preferences.json', FilesPrefsSchema, () => ({
@@ -66,8 +68,8 @@ export function registerWorkspaceFilesHost(options: RegisterWorkspaceFilesHostOp
         run: async () => {
           const prefs = await prefsStore.read()
           const [quickFolders, drives] = await Promise.all([
-            listQuickFolders(prefs.pinnedFolders),
-            listDrives(),
+            listQuickFolders(prefs.pinnedFolders, fsService),
+            listDrives(fsService),
           ])
           return {
             homePath: normalizeBrowsePath(os.homedir()),
@@ -132,7 +134,12 @@ export function registerWorkspaceFilesHost(options: RegisterWorkspaceFilesHostOp
         input: z.object({
           path: z.string().min(1),
         }),
-        run: async input => revealInExplorer(input.path),
+        run: async input => {
+          if (!native) {
+            throw new FolioError('native_unavailable', '基础桌面原生服务未就绪', 503)
+          }
+          return native.revealPath(input.path)
+        },
       }),
     ),
 
@@ -418,8 +425,8 @@ export function registerWorkspaceFilesHost(options: RegisterWorkspaceFilesHostOp
       '/files/thumb',
       createThumbRouteHandler({ thumbs, native, thumbProvider }),
     ),
-    runtime.registerRoute('GET', '/files/media', createMediaRouteHandler()),
-    runtime.registerRoute('GET', '/files/download', createDownloadRouteHandler()),
+    runtime.registerRoute('GET', '/files/media', createMediaRouteHandler(fsService)),
+    runtime.registerRoute('GET', '/files/download', createDownloadRouteHandler(fsService)),
   ]
 
   return () => {
@@ -431,7 +438,13 @@ export function registerWorkspaceFilesHost(options: RegisterWorkspaceFilesHostOp
 }
 
 export const name = 'workspace-files-host'
-export const inject = ['folioRuntime', 'folioStorage', 'folioThumbs', 'folioNative'] as const
+export const inject = [
+  'folioRuntime',
+  'folioStorage',
+  'folioThumbs',
+  'folioNative',
+  'folioFs',
+] as const
 
 export function apply(ctx: Context): void {
   ctx.effect(
@@ -439,6 +452,7 @@ export function apply(ctx: Context): void {
       registerWorkspaceFilesHost({
         runtime: ctx.folioRuntime,
         storage: ctx.folioStorage,
+        fs: ctx.folioFs,
         thumbs: ctx.folioThumbs,
         native: ctx.folioNative,
       }),

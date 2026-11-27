@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Base tasks UI",
+    "description": "Provides the multi-scope SSE task subscription hook (useFolioTasks) and unified status bar progress control (TaskStatusBar) paired with @folio/base-tasks-host.",
+    "detail": "docs/DETAIL.md"
+  }
+}

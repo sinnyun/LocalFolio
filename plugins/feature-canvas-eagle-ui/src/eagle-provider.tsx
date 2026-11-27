@@ -5,6 +5,7 @@ import type {
   CanvasLinkedItemInfo,
 } from '@folio/base-contract'
 import { RpcError, rpcCall } from '@folio/base-contract/rpc'
+import { copyTextToClipboard } from '@folio/base-metadata-ui/client'
 import { Badge, Button, cn, toast } from '@folio/base-ui-kit/client'
 import {
   Activity,
@@ -208,18 +209,13 @@ function pathTail(filePath: string): string {
 }
 
 function copyTextWithToast(label: string, text: string): void {
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    void navigator.clipboard
-      .writeText(text)
-      .then(() => {
-        toast({ title: `已复制${label}`, tone: 'success' })
-      })
-      .catch(() => {
-        toast({ title: `复制${label}失败`, tone: 'danger' })
-      })
-    return
-  }
-  toast({ title: `当前环境不支持自动复制${label}`, tone: 'info' })
+  void copyTextToClipboard(text).then(ok => {
+    if (ok) {
+      toast({ title: `已复制${label}`, tone: 'success' })
+    } else {
+      toast({ title: `复制${label}失败`, tone: 'danger' })
+    }
+  })
 }
 
 interface MetadataRowProps {

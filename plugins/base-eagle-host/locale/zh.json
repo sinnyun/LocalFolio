@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "基础 Eagle 通信能力",
+    "description": "为各功能插件提供统一的本地 Eagle Web API 客户端（127.0.0.1:41595）、超时与 JSON 信封校验、缩略图路径解码及跨平台 eagle:// 深链接唤起服务（ctx.folioEagle）。",
+    "detail": "./docs/DETAIL.md"
+  }
+}

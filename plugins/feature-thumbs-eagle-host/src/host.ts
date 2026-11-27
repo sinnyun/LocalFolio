@@ -5,6 +5,8 @@ import { z } from 'zod'
 import {
   FolioError,
   defineAction,
+  type FolioEagleService,
+  type FolioFsService,
   type FolioProjectsHostService,
   type FolioRuntimeService,
   type FolioStorageService,
@@ -66,6 +68,8 @@ export interface RegisterFeatureThumbsEagleHostOptions {
   readonly storage: FolioStorageService
   readonly tasks: FolioTasksService
   readonly thumbs: FolioThumbsService
+  readonly eagle?: FolioEagleService
+  readonly fs?: FolioFsService
   readonly projectsHost?: FolioProjectsHostService
   readonly fetchImpl?: FetchLike
   readonly probeTimeoutMs?: number
@@ -75,7 +79,7 @@ export interface RegisterFeatureThumbsEagleHostOptions {
 export function registerFeatureThumbsEagleHost(
   options: RegisterFeatureThumbsEagleHostOptions,
 ): () => void {
-  const { runtime, storage, tasks, thumbs, projectsHost } = options
+  const { runtime, storage, tasks, thumbs, eagle, fs, projectsHost } = options
   const pluginStorage = storage.forPlugin('feature-thumbs-eagle-host')
   const defaultCacheLibraryPath = pluginStorage.dataPath('ThumbCache.library')
 
@@ -103,6 +107,8 @@ export function registerFeatureThumbsEagleHost(
       state,
       client: createEagleThumbClient({
         apiBase: state.apiBase,
+        eagle,
+        fs,
         fetchImpl: options.fetchImpl,
         probeTimeoutMs: options.probeTimeoutMs,
         pollIntervalMs: options.pollIntervalMs,
@@ -439,6 +445,8 @@ export const inject = [
   'folioStorage',
   'folioTasks',
   'folioThumbs',
+  'folioEagle',
+  'folioFs',
   'folioProjectsHost',
 ] as const
 
@@ -450,6 +458,8 @@ export function apply(ctx: Context): void {
         storage: ctx.folioStorage,
         tasks: ctx.folioTasks,
         thumbs: ctx.folioThumbs,
+        eagle: ctx.folioEagle,
+        fs: ctx.folioFs,
         projectsHost: ctx.folioProjectsHost,
       }),
     'feature-thumbs-eagle-host: manual Eagle thumbnail provider & actions',

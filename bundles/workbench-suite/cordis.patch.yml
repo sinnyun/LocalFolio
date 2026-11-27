@@ -12,10 +12,20 @@
       name: '@folio/base-tasks-host'
     - id: base-native-host
       name: '@folio/base-native-host'
+    - id: base-fs-host
+      name: '@folio/base-fs-host'
+    - id: base-eagle-host
+      name: '@folio/base-eagle-host'
     - id: base-thumbs-host
       name: '@folio/base-thumbs-host'
     - id: base-ui-kit
       name: '@folio/base-ui-kit'
+    - id: base-collection-ui
+      name: '@folio/base-collection-ui'
+    - id: base-tasks-ui
+      name: '@folio/base-tasks-ui'
+    - id: base-metadata-ui
+      name: '@folio/base-metadata-ui'
     - id: base-shell-ui
       name: '@folio/base-shell-ui'
     - id: bridge-dsh-interactions-ui

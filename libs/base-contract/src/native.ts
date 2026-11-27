@@ -39,6 +39,20 @@ export interface NativePickFilesResult {
   readonly paths: readonly string[]
 }
 
+export interface NativePickSaveFileOptions {
+  readonly title?: string
+  readonly filter?: string
+  readonly defaultExt?: string
+  readonly defaultName?: string
+  readonly initialDir?: string
+}
+
+export interface NativePickSaveFileResult {
+  readonly supported: boolean
+  readonly cancelled: boolean
+  readonly filePath: string | null
+}
+
 /**
  * Host Cordis service (`ctx.folioNative`) provided by `@folio/base-native-host`.
  * Centralizes Windows native Shell/WIC thumbnail & proxy worker pools,
@@ -57,6 +71,7 @@ export interface FolioNativeService {
   ): Promise<NativeImageProxyResult | null>
   pickFolder(options?: NativePickFolderOptions): Promise<NativePickFolderResult>
   pickFiles(options?: NativePickFilesOptions): Promise<NativePickFilesResult>
+  pickSaveFile?(options?: NativePickSaveFileOptions): Promise<NativePickSaveFileResult>
   revealPath(targetPath: string): Promise<{ readonly revealedPath: string }>
   openPath(targetPath: string): Promise<{ readonly openedPath: string }>
   setHiddenAttribute(targetPath: string, hidden?: boolean): Promise<boolean>

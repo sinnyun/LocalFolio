@@ -189,4 +189,116 @@ describe('@folio/feature-thumbs-eagle-host', () => {
     tasksHost.dispose()
     runtime.dispose()
   })
+
+  it('delegates to injected FolioEagleService and FolioFsService when provided', async () => {
+    const dataDir = await makeTempDir()
+    const sampleDir = await makeTempDir()
+    const generatedThumbPath = path.join(sampleDir, 'stub-thumb.webp')
+    const fakeWebp = Buffer.from([
+      0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+    ])
+    await fsp.writeFile(generatedThumbPath, fakeWebp)
+
+    const sourceFile = path.join(sampleDir, 'model.blend')
+    await fsp.writeFile(sourceFile, Buffer.alloc(512, 0x11))
+
+    const userLibPath = path.join(sampleDir, 'Main.library')
+    let currentLibPath = userLibPath
+    const trashedIds: string[] = []
+    let sniffCalls = 0
+
+    const stubEagle = {
+      async requestJson() {
+        return null as never
+      },
+      async ping() {
+        return true
+      },
+      async getLibraryInfo() {
+        return { path: currentLibPath, name: path.basename(currentLibPath) }
+      },
+      async switchLibrary(libraryPath: string) {
+        currentLibPath = libraryPath
+        return true
+      },
+      async getItem() {
+        return null
+      },
+      async getFolder() {
+        return null
+      },
+      async getItemThumbnailPath(itemId: string) {
+        return itemId === 'STUBITEM1' ? generatedThumbPath : null
+      },
+      async addItemFromPath() {
+        return 'STUBITEM1'
+      },
+      async listItems() {
+        return []
+      },
+      async moveItemsToTrash(itemIds: readonly string[]) {
+        trashedIds.push(...itemIds)
+        return true
+      },
+      async openDeepLink() {},
+      extractItemIdFromDeepLink() {
+        return null
+      },
+    }
+
+    const stubFs = {
+      sniffImageMime(buf: Buffer) {
+        sniffCalls += 1
+        return buf.subarray(8, 12).toString('ascii') === 'WEBP' ? 'image/webp' : null
+      },
+    } as unknown as import('@folio/base-contract').FolioFsService
+
+    const storage = createFolioStorageService({ dataDir })
+    const runtime = createFolioRuntimeService({
+      storage,
+      admit: () => true,
+      trustedOrigins: [],
+    })
+    const tasksHost = registerBaseTasksHost({ runtime })
+    const thumbsHost = registerBaseThumbsHost({
+      runtime,
+      storage,
+      native: createNullNative(),
+      tasks: tasksHost.service,
+    })
+    const disposeEagle = registerFeatureThumbsEagleHost({
+      runtime,
+      storage,
+      tasks: tasksHost.service,
+      thumbs: thumbsHost.service,
+      eagle: stubEagle,
+      fs: stubFs,
+      pollIntervalMs: 10,
+    })
+
+    const { task } = await runtime.executeAction<{ task: { id: string } }>('thumbs.eagle.generate', {
+      filePaths: [sourceFile],
+    })
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline) {
+      const snap = tasksHost.service.getTask(task.id)
+      if (snap && (snap.status === 'completed' || snap.status === 'failed')) {
+        expect(snap.status).toBe('completed')
+        break
+      }
+      await new Promise(r => setTimeout(r, 20))
+    }
+
+    expect(sniffCalls).toBe(1)
+    expect(trashedIds).toEqual(['STUBITEM1'])
+    expect(currentLibPath).toBe(userLibPath)
+    const [status] = await thumbsHost.service.queryStatus([sourceFile])
+    expect(status?.status).toBe('READY')
+    expect(status?.mime).toBe('image/webp')
+
+    disposeEagle()
+    thumbsHost.dispose()
+    tasksHost.dispose()
+    runtime.dispose()
+  })
 })

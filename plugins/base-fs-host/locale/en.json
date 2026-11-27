@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Base Filesystem Service",
+    "description": "Provides shared path normalization/containment, file classification & image header parsing, drive/quick-folder enumeration, HTTP Range media streaming, and LRU cache pruning (ctx.folioFs).",
+    "detail": "./docs/DETAIL.md"
+  }
+}

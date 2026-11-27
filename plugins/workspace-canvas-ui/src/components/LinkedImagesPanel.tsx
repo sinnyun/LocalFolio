@@ -13,21 +13,9 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { Badge, Button, cn } from '@folio/base-ui-kit/client'
+import { Badge, Button, cn, formatBytes } from '@folio/base-ui-kit/client'
 import { useCanvas } from '../context.js'
 import { buildProxyUrl } from '../lod.js'
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let val = bytes
-  let idx = 0
-  while (val >= 1024 && idx < units.length - 1) {
-    val /= 1024
-    idx += 1
-  }
-  return `${val >= 10 || idx === 0 ? Math.round(val) : val.toFixed(1)} ${units[idx]}`
-}
 
 export function LinkedImagesPanel(): React.ReactElement | null {
   const {

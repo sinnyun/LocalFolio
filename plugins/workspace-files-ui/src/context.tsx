@@ -4,8 +4,10 @@ import type {
   FolioInteractionsService,
   FrameProviderProps,
 } from '@folio/base-contract'
+import { useLightboxState, type LightboxState } from '@folio/base-collection-ui/client'
+import { copyTextToClipboard } from '@folio/base-metadata-ui/client'
 import { rpcCall } from '@folio/base-contract/rpc'
-import { toast, type LightboxItem } from '@folio/base-ui-kit/client'
+import { toast } from '@folio/base-ui-kit/client'
 import {
   buildDownloadUrl,
   buildMediaUrl,
@@ -126,11 +128,7 @@ function computeTagCountsLocal(
   return counts
 }
 
-export interface LightboxState {
-  readonly open: boolean
-  readonly items: readonly LightboxItem[]
-  readonly index: number
-}
+export type { LightboxState }
 
 export interface FilesContextValue {
   readonly interactions: FolioInteractionsService | undefined
@@ -228,31 +226,6 @@ const DEFAULT_METADATA: MetadataSnapshot = {
   tagCounts: {},
 }
 
-async function copyText(text: string): Promise<boolean> {
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text)
-      return true
-    } catch {
-      // fall through
-    }
-  }
-  if (typeof document !== 'undefined') {
-    const textarea = document.createElement('textarea')
-    textarea.value = text
-    textarea.style.position = 'fixed'
-    textarea.style.opacity = '0'
-    document.body.appendChild(textarea)
-    textarea.select()
-    try {
-      return document.execCommand('copy')
-    } finally {
-      textarea.remove()
-    }
-  }
-  return false
-}
-
 export interface FilesProviderProps extends FrameProviderProps {
   readonly getInteractions?: () => FolioInteractionsService | undefined
 }
@@ -295,11 +268,12 @@ export function FilesProvider({
   const [treeExpanded, setTreeExpanded] = React.useState<Set<string>>(() => new Set())
   const [treeLoading, setTreeLoading] = React.useState<Set<string>>(() => new Set())
 
-  const [lightbox, setLightbox] = React.useState<LightboxState>({
-    open: false,
-    items: [],
-    index: 0,
-  })
+  const {
+    lightbox,
+    openLightbox,
+    setLightboxOpen,
+    setLightboxIndex,
+  } = useLightboxState()
 
   const navControllersRef = React.useRef<Record<PaneId, AbortController | null>>({
     left: null,
@@ -1151,40 +1125,34 @@ export function FilesProvider({
     [],
   )
 
-  const openLightboxForEntry = React.useCallback((paneId: PaneId, entry: FileEntry) => {
-    const pane = panesRef.current[paneId]
-    const pool = [
-      ...pane.entries.filter(e => !e.isDir && e.category === 'image'),
-      ...pane.childGroups.flatMap(g => g.entries.filter(e => !e.isDir && e.category === 'image')),
-    ]
-    const dedup = new Map<string, FileEntry>()
-    for (const item of pool) {
-      if (!dedup.has(item.path)) dedup.set(item.path, item)
-    }
-    if (!dedup.has(entry.path)) dedup.set(entry.path, entry)
-    const imageList = Array.from(dedup.values())
-    const idx = Math.max(
-      0,
-      imageList.findIndex(item => item.path === entry.path),
-    )
-    setLightbox({
-      open: true,
-      index: idx,
-      items: imageList.map(item => ({
-        src: buildMediaUrl(item),
-        alt: item.name,
-        caption: item.name,
-      })),
-    })
-  }, [])
-
-  const setLightboxOpen = React.useCallback((open: boolean) => {
-    setLightbox(prev => ({ ...prev, open }))
-  }, [])
-
-  const setLightboxIndex = React.useCallback((index: number) => {
-    setLightbox(prev => ({ ...prev, index }))
-  }, [])
+  const openLightboxForEntry = React.useCallback(
+    (paneId: PaneId, entry: FileEntry) => {
+      const pane = panesRef.current[paneId]
+      const pool = [
+        ...pane.entries.filter(e => !e.isDir && e.category === 'image'),
+        ...pane.childGroups.flatMap(g => g.entries.filter(e => !e.isDir && e.category === 'image')),
+      ]
+      const dedup = new Map<string, FileEntry>()
+      for (const item of pool) {
+        if (!dedup.has(item.path)) dedup.set(item.path, item)
+      }
+      if (!dedup.has(entry.path)) dedup.set(entry.path, entry)
+      const imageList = Array.from(dedup.values())
+      const idx = Math.max(
+        0,
+        imageList.findIndex(item => item.path === entry.path),
+      )
+      openLightbox(
+        imageList.map(item => ({
+          src: buildMediaUrl(item),
+          alt: item.name,
+          caption: item.name,
+        })),
+        idx,
+      )
+    },
+    [openLightbox],
+  )
 
   const openInOtherPane = React.useCallback(
     async (dirPath: string) => {
@@ -1348,7 +1316,7 @@ export function FilesProvider({
             label: '复制完整路径',
             separatorBefore: true,
             run: async () => {
-              const ok = await copyText(entry.path)
+              const ok = await copyTextToClipboard(entry.path)
               if (ok) {
                 toast({ title: '已复制文件路径', description: entry.path, tone: 'success' })
               }

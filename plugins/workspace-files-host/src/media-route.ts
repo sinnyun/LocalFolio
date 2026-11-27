@@ -1,18 +1,14 @@
-import fs from 'node:fs'
 import fsp from 'node:fs/promises'
-import path from 'node:path'
-import { Readable } from 'node:stream'
 import {
   FolioError,
+  type FolioFsService,
   type FolioNativeService,
   type FolioRouteHandler,
   type FolioThumbsService,
 } from '@folio/base-contract'
-import { classifyFile, isStreamableMediaExt, normalizeBrowsePath } from './classify.js'
+import { normalizeBrowsePath } from './classify.js'
 import type { ShellThumbProvider } from './win-thumb.js'
 
-const MAX_IMAGE_STREAM_BYTES = 50 * 1024 * 1024 // 50 MB
-const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024 // 100 MB
 const THUMB_BUCKETS = [96, 160, 256, 512] as const
 
 function snapThumbBucket(rawSize: number): number {
@@ -43,7 +39,7 @@ export function createThumbRouteHandler(
     }
 
     const filePath = normalizeBrowsePath(rawPath)
-    let st: fs.Stats
+    let st
     try {
       st = await fsp.stat(filePath)
     } catch {
@@ -124,154 +120,30 @@ export function createThumbRouteHandler(
   }
 }
 
-export function createMediaRouteHandler(): FolioRouteHandler {
+export function createMediaRouteHandler(fsService?: FolioFsService): FolioRouteHandler {
   return async (request: Request): Promise<Response> => {
+    if (!fsService) {
+      throw new FolioError('fs_unavailable', '基础文件系统服务未就绪', 503)
+    }
     const url = new URL(request.url)
     const rawPath = url.searchParams.get('path')
     if (!rawPath) {
       throw new FolioError('missing_path', '缺少 path 参数', 400)
     }
-
-    const filePath = normalizeBrowsePath(rawPath)
-    let st: fs.Stats
-    try {
-      st = await fsp.stat(filePath)
-    } catch {
-      throw new FolioError('not_found', `文件不存在: ${filePath}`, 404)
-    }
-
-    if (!st.isFile()) {
-      throw new FolioError('not_a_file', '只能流式读取普通文件', 400)
-    }
-
-    const meta = classifyFile(filePath, false)
-    if (!isStreamableMediaExt(meta.ext)) {
-      throw new FolioError('unsupported_media', `不支持预览该媒体类型: ${meta.ext}`, 415)
-    }
-    if (meta.category === 'image' && st.size > MAX_IMAGE_STREAM_BYTES) {
-      throw new FolioError('payload_too_large', '图片体积超出 50MB 预览上限', 413)
-    }
-
-    const etag = `"media-${st.size}-${Math.trunc(st.mtimeMs)}"`
-    if (request.headers.get('if-none-match') === etag) {
-      return new Response(null, {
-        status: 304,
-        headers: {
-          etag,
-          'cache-control': 'private, max-age=300',
-        },
-      })
-    }
-
-    const baseHeaders: Record<string, string> = {
-      'content-type': meta.mime,
-      'accept-ranges': 'bytes',
-      etag,
-      'cache-control': 'private, max-age=300',
-      'x-content-type-options': 'nosniff',
-    }
-    if (meta.ext === '.svg') {
-      baseHeaders['content-security-policy'] = 'sandbox'
-    }
-
-    if (request.method.toUpperCase() === 'HEAD') {
-      baseHeaders['content-length'] = String(st.size)
-      return new Response(null, { status: 200, headers: baseHeaders })
-    }
-
-    const rangeHeader = request.headers.get('range')
-    if (rangeHeader && st.size > 0) {
-      const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim())
-      if (!match) {
-        return new Response(null, {
-          status: 416,
-          headers: { 'content-range': `bytes */${st.size}` },
-        })
-      }
-      const start = match[1] ? Number(match[1]) : 0
-      const end = match[2] ? Math.min(st.size - 1, Number(match[2])) : st.size - 1
-      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= st.size) {
-        return new Response(null, {
-          status: 416,
-          headers: { 'content-range': `bytes */${st.size}` },
-        })
-      }
-
-      const chunkSize = end - start + 1
-      const stream = fs.createReadStream(filePath, { start, end })
-      const webStream = Readable.toWeb(stream) as ReadableStream<Uint8Array>
-      return new Response(webStream, {
-        status: 206,
-        headers: {
-          ...baseHeaders,
-          'content-range': `bytes ${start}-${end}/${st.size}`,
-          'content-length': String(chunkSize),
-        },
-      })
-    }
-
-    baseHeaders['content-length'] = String(st.size)
-    const stream = fs.createReadStream(filePath)
-    const webStream = Readable.toWeb(stream) as ReadableStream<Uint8Array>
-    return new Response(webStream, { status: 200, headers: baseHeaders })
+    return fsService.serveMediaFile(request, rawPath, { etagPrefix: 'media' })
   }
 }
 
-export function createDownloadRouteHandler(): FolioRouteHandler {
+export function createDownloadRouteHandler(fsService?: FolioFsService): FolioRouteHandler {
   return async (request: Request): Promise<Response> => {
+    if (!fsService) {
+      throw new FolioError('fs_unavailable', '基础文件系统服务未就绪', 503)
+    }
     const url = new URL(request.url)
     const rawPath = url.searchParams.get('path')
     if (!rawPath) {
       throw new FolioError('missing_path', '缺少 path 参数', 400)
     }
-
-    const filePath = normalizeBrowsePath(rawPath)
-    let st: fs.Stats
-    try {
-      st = await fsp.stat(filePath)
-    } catch {
-      throw new FolioError('not_found', `文件不存在: ${filePath}`, 404)
-    }
-
-    if (!st.isFile()) {
-      throw new FolioError('not_a_file', '只能下载普通文件', 400)
-    }
-
-    if (st.size > MAX_DOWNLOAD_BYTES) {
-      throw new FolioError('payload_too_large', '文件体积超出 100MB 传输上限', 413)
-    }
-
-    const meta = classifyFile(filePath, false)
-    const etag = `"dl-${st.size}-${Math.trunc(st.mtimeMs)}"`
-    if (request.headers.get('if-none-match') === etag) {
-      return new Response(null, {
-        status: 304,
-        headers: {
-          etag,
-          'cache-control': 'private, no-store',
-        },
-      })
-    }
-
-    const fileName = path.basename(filePath) || 'file'
-    const headers: Record<string, string> = {
-      'content-type': meta.mime,
-      'content-length': String(st.size),
-      'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
-      etag,
-      'cache-control': 'private, no-store',
-      'x-content-type-options': 'nosniff',
-    }
-    if (meta.ext === '.svg' || meta.ext === '.html' || meta.ext === '.htm') {
-      headers['content-security-policy'] = 'sandbox'
-    }
-
-    if (request.method.toUpperCase() === 'HEAD') {
-      return new Response(null, { status: 200, headers })
-    }
-
-    const stream = fs.createReadStream(filePath)
-    const webStream = Readable.toWeb(stream) as ReadableStream<Uint8Array>
-    return new Response(webStream, { status: 200, headers })
+    return fsService.serveDownloadFile(request, rawPath, { etagPrefix: 'dl' })
   }
 }

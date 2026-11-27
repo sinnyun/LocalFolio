@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { copyTextToClipboard } from '@folio/base-metadata-ui/client'
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Copy, RefreshCw } from 'lucide-react'
 import {
   Badge,
@@ -57,13 +58,10 @@ export function AiTraceDialog({ open, onOpenChange }: AiTraceDialogProps): React
   }
 
   const handleCopy = async (key: string, text: string): Promise<void> => {
-    try {
-      await navigator.clipboard?.writeText(text)
-      setCopiedKey(key)
-      setTimeout(() => setCopiedKey(curr => (curr === key ? null : curr)), 1500)
-    } catch {
-      // ignore clipboard unavailability
-    }
+    const ok = await copyTextToClipboard(text)
+    if (!ok) return
+    setCopiedKey(key)
+    setTimeout(() => setCopiedKey(curr => (curr === key ? null : curr)), 1500)
   }
 
   const activeSystemPrompt =

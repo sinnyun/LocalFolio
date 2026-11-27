@@ -18,12 +18,18 @@
       "immediately": true,
       "inject": [
         "@folio/base-ui-kit",
+        "@folio/base-collection-ui",
+        "@folio/base-tasks-ui",
+        "@folio/base-metadata-ui",
         "@folio/base-shell-ui",
         "@folio/base-frame-ui",
         "@folio/bridge-dsh-interactions-ui"
       ],
       "external": [
-        "@folio/base-ui-kit"
+        "@folio/base-ui-kit",
+        "@folio/base-collection-ui",
+        "@folio/base-tasks-ui",
+        "@folio/base-metadata-ui"
       ]
     }
   },
@@ -40,6 +46,9 @@
   "devDependencies": {
     "@folio/base-contract": "workspace:*",
     "@folio/base-ui-kit": "workspace:*",
+    "@folio/base-collection-ui": "workspace:*",
+    "@folio/base-tasks-ui": "workspace:*",
+    "@folio/base-metadata-ui": "workspace:*",
     "lucide-react": "^0.511.0"
   },
   "engines": {

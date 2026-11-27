@@ -1,45 +1,8 @@
-import type { FileCategory, ProjectFileEntry, ProjectFolderGroup, SortMode } from './types.js'
+import { compareNaturalName } from '@folio/base-collection-ui/client'
+import { categoryLabel, formatBytes, formatDateTime } from '@folio/base-ui-kit/client'
+import type { ProjectFileEntry, ProjectFolderGroup, SortMode } from './types.js'
 
-export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let val = bytes
-  let idx = 0
-  while (val >= 1024 && idx < units.length - 1) {
-    val /= 1024
-    idx += 1
-  }
-  const digits = idx === 0 ? 0 : val >= 100 ? 0 : val >= 10 ? 1 : 2
-  return `${val.toFixed(digits)} ${units[idx]}`
-}
-
-export function formatDateTime(ts: number): string {
-  if (!Number.isFinite(ts) || ts <= 0) return '—'
-  const d = new Date(ts)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-export function categoryLabel(category: FileCategory): string {
-  switch (category) {
-    case 'image':
-      return '图片'
-    case 'video':
-      return '视频'
-    case 'audio':
-      return '音频'
-    case 'document':
-      return '文档'
-    case 'design':
-      return '设计工程'
-    case 'code':
-      return '代码配置'
-    case 'archive':
-      return '压缩包'
-    default:
-      return '其他'
-  }
-}
+export { categoryLabel, formatBytes, formatDateTime }
 
 export function buildProjectThumbUrl(
   projectId: string,
@@ -79,7 +42,7 @@ export function sortFiles(files: readonly ProjectFileEntry[], mode: SortMode): P
   copy.sort((a, b) => {
     if (mode === 'size') return b.size - a.size || a.name.localeCompare(b.name)
     if (mode === 'mtime') return b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name)
-    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    return compareNaturalName(a.name, b.name)
   })
   return copy
 }

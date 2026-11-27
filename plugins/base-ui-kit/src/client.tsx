@@ -182,6 +182,14 @@ export { getPortalContainer, setPortalContainer, usePortalContainer } from './po
 export { FOLIO_UI_STYLES } from './styles.js'
 export * from './icons.js'
 export { cn } from './lib/utils.js'
+export { formatBytes, formatDateTime, categoryLabel } from './format.js'
+export {
+  FileCategoryIcon,
+  LazyThumbImage,
+  type FileCategoryIconProps,
+  type LazyThumbImageProps,
+  type SharedFileCategory,
+} from './components/FileCategoryIcon.js'
 
 // Generic shadcn/ui primitives & hooks (auto-synced by scripts/sync-ui-kit.mjs)
 export * from './ui-exports.generated.js'

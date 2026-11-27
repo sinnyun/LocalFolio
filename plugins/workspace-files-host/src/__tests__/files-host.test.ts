@@ -2,6 +2,7 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { createFolioFsService } from '../../../base-fs-host/src/host.js'
 import { createFolioRuntimeService, type ManagedFolioRuntime } from '../../../base-runtime-host/src/host.js'
 import { createFolioStorageService } from '../../../base-storage-host/src/host.js'
 import { buildBreadcrumbs, classifyFile, getParentPath, parseImageDimensionsFromBuffer } from '../classify.js'
@@ -60,6 +61,7 @@ describe('@folio/workspace-files-host', () => {
     disposeFiles = registerWorkspaceFilesHost({
       runtime,
       storage,
+      fs: createFolioFsService(),
       thumbProvider: stubThumbProvider,
     })
   })

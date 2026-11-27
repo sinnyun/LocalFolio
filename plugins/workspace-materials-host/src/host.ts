@@ -5,6 +5,8 @@ import { z } from 'zod'
 import {
   FolioError,
   defineAction,
+  type FolioFsService,
+  type FolioNativeService,
   type FolioRuntimeService,
   type FolioStorageService,
 } from '@folio/base-contract'
@@ -46,6 +48,8 @@ import { createMaterialsSyncManager } from './watcher.js'
 export interface RegisterWorkspaceMaterialsHostOptions {
   readonly runtime: FolioRuntimeService
   readonly storage: FolioStorageService
+  readonly native?: FolioNativeService
+  readonly fs?: FolioFsService
   readonly bridge?: VectorCraftBridge
   readonly dialogProvider?: MaterialsDialogProvider
   readonly disableAutoSync?: boolean
@@ -59,10 +63,10 @@ function samePath(a: string | null | undefined, b: string | null | undefined): b
 export function registerWorkspaceMaterialsHost(
   options: RegisterWorkspaceMaterialsHostOptions,
 ): () => void {
-  const { runtime, storage } = options
+  const { runtime, storage, native, fs } = options
   const pluginStorage = storage.forPlugin('workspace-materials-host')
   const store = createMaterialsStore(pluginStorage)
-  const dialogProvider = options.dialogProvider ?? createWindowsMaterialsDialogProvider()
+  const dialogProvider = options.dialogProvider ?? createWindowsMaterialsDialogProvider(native)
 
   let syncManager: ReturnType<typeof createMaterialsSyncManager> | null = null
 
@@ -1188,6 +1192,7 @@ export function registerWorkspaceMaterialsHost(
       createMaterialsPreviewRouteHandler({
         cacheDir: pluginStorage.cacheDir,
         bridge,
+        fs,
       }),
     ),
   ]
@@ -1202,7 +1207,7 @@ export function registerWorkspaceMaterialsHost(
 }
 
 export const name = 'workspace-materials-host'
-export const inject = ['folioRuntime', 'folioStorage'] as const
+export const inject = ['folioRuntime', 'folioStorage', 'folioNative', 'folioFs'] as const
 
 export function apply(ctx: Context): void {
   ctx.effect(
@@ -1210,6 +1215,8 @@ export function apply(ctx: Context): void {
       registerWorkspaceMaterialsHost({
         runtime: ctx.folioRuntime,
         storage: ctx.folioStorage,
+        native: ctx.folioNative,
+        fs: ctx.folioFs,
       }),
     'workspace-materials-host: actions + vectorcraft bridge + preview route',
   )
@@ -1234,5 +1241,5 @@ export {
 export { compileCliCommands, createRealVectorCraftBridge } from './vectorcraft-bridge.js'
 export type { LiveDocumentSummary, LiveProbeResult, VectorCraftBridge } from './vectorcraft-bridge.js'
 export { createMaterialsPreviewRouteHandler } from './preview-route.js'
-export { createWindowsMaterialsDialogProvider, normalizeLocalPath, revealLocalPath } from './dialogs.js'
+export { createWindowsMaterialsDialogProvider, normalizeLocalPath } from './dialogs.js'
 export type { MaterialsDialogProvider } from './dialogs.js'

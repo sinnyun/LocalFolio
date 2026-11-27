@@ -1,53 +1,33 @@
-import { execFile, spawn } from 'node:child_process'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { promisify } from 'node:util'
-import { FolioError } from '@folio/base-contract'
-
-const execFileAsync = promisify(execFile)
+import {
+  FolioError,
+  type EagleFolderInfo,
+  type EagleItemDetail,
+  type FolioEagleService,
+} from '@folio/base-contract'
+import {
+  buildCleanLaunchEnv,
+  createFolioEagleService,
+  DEFAULT_EAGLE_API_BASE,
+  extractItemIdFromDeepLink,
+  isValidEagleItemId,
+  openDeepLinkUri,
+  type FetchLike,
+} from '../../base-eagle-host/src/host.js'
 import type {
   EagleFolderSource,
   EagleImageSource,
   EagleOpenItemResult,
 } from './types.js'
 
-export const DEFAULT_EAGLE_API_BASE = 'http://127.0.0.1:41595'
-const DEFAULT_EAGLE_TIMEOUT_MS = 2500
-const EAGLE_ITEM_ID_RE = /^[A-Za-z0-9]+$/
-const EAGLE_DEEP_LINK_RE = /^eagle:\/\/item\/([A-Za-z0-9]+)(?:\/(?:[?#].*)?|[?#].*)?$/i
-
-interface EagleEnvelope<T> {
-  status?: string
-  data?: T
-  message?: string
-}
-
-interface EagleItemRaw {
-  id: string
-  name: string
-  ext: string
-  size: number
-  folders?: readonly string[]
-  isDeleted?: boolean
-  noThumbnail?: boolean
-}
-
-interface EagleFolderRaw {
-  id: string
-  name: string
-  children?: readonly EagleFolderRaw[]
-}
-
-export function isValidEagleItemId(itemId: string): boolean {
-  return EAGLE_ITEM_ID_RE.test(itemId.trim())
-}
-
-export function extractEagleItemIdFromDeepLink(raw: string): string | null {
-  const match = raw.trim().match(EAGLE_DEEP_LINK_RE)
-  if (!match?.[1]) return null
-  return isValidEagleItemId(match[1]) ? match[1] : null
+export {
+  buildCleanLaunchEnv,
+  DEFAULT_EAGLE_API_BASE,
+  extractItemIdFromDeepLink as extractEagleItemIdFromDeepLink,
+  isValidEagleItemId,
 }
 
 function stripWindowsExtendedPrefix(filePath: string): string {
@@ -108,122 +88,16 @@ function canonicalPathKey(filePath: string): string {
   return process.platform === 'win32' ? clean.toLowerCase() : clean
 }
 
-function safeDecodePercent(encoded: string): string {
-  try {
-    return decodeURIComponent(encoded)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    throw new FolioError(
-      'eagle_thumbnail_decode_failed',
-      `invalid Eagle thumbnail path encoding: ${msg}`,
-      502,
-    )
-  }
-}
-
-const STRIPPED_ELECTRON_ENV_KEYS = new Set([
-  'ELECTRON_RUN_AS_NODE',
-  'ELECTRON_NO_ATTACH_CONSOLE',
-  'NODE_OPTIONS',
-  'NODE_CHANNEL_FD',
-  'NODE_CHANNEL_SERIALIZATION_MODE',
-])
-
-/**
- * Strip Electron/Node host inheritance flags (notably ELECTRON_RUN_AS_NODE=1 from
- * DeepSeek Harness Desktop) so launching Eagle.exe via protocol handler boots Eagle's
- * GUI process cleanly instead of falling back to Node.js CLI mode.
- */
-export function buildCleanLaunchEnv(
-  baseEnv: Readonly<Record<string, string | undefined>> = process.env,
-): {
-  readonly env: Record<string, string | undefined>
-  readonly strippedElectronRunAsNode: boolean
-} {
-  const env: Record<string, string | undefined> = {}
-  let strippedElectronRunAsNode = false
-  for (const [key, value] of Object.entries(baseEnv)) {
-    const upper = key.toUpperCase()
-    if (STRIPPED_ELECTRON_ENV_KEYS.has(upper)) {
-      if (upper === 'ELECTRON_RUN_AS_NODE' && value !== undefined) {
-        strippedElectronRunAsNode = true
-      }
-      continue
-    }
-    env[key] = value
-  }
-  return { env, strippedElectronRunAsNode }
-}
-
-function launchDetached(
-  command: string,
-  args: readonly string[],
-  errorPrefix: string,
-  env: Record<string, string | undefined>,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-      env,
-    })
-    const onError = (err: Error): void => {
-      reject(new FolioError('eagle_open_failed', `${errorPrefix}: ${err.message}`, 500))
-    }
-    child.once('error', onError)
-    child.once('spawn', () => {
-      child.off('error', onError)
-      child.unref()
-      resolve()
-    })
-  })
-}
-
 export async function openEagleDeepLink(
   deepLink: string,
 ): Promise<{ readonly strippedElectronRunAsNode: boolean }> {
-  if (!extractEagleItemIdFromDeepLink(deepLink)) {
-    throw new FolioError('invalid_eagle_item_id', 'Eagle item ID is invalid', 400)
-  }
-
-  const { env, strippedElectronRunAsNode } = buildCleanLaunchEnv()
-
-  if (process.platform === 'win32') {
-    try {
-      await execFileAsync(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-Command',
-          "$ErrorActionPreference = 'Stop'; Start-Process -FilePath $env:FOLIO_EAGLE_URI",
-        ],
-        {
-          env: { ...env, FOLIO_EAGLE_URI: deepLink },
-          timeout: 8000,
-          windowsHide: true,
-        },
-      )
-      return { strippedElectronRunAsNode }
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error)
-      throw new FolioError('eagle_open_failed', `cannot open ${deepLink}: ${msg}`, 500)
-    }
-  }
-
-  if (process.platform === 'darwin') {
-    await launchDetached('open', [deepLink], `cannot open ${deepLink}`, env)
-    return { strippedElectronRunAsNode }
-  }
-
-  await launchDetached('xdg-open', [deepLink], `cannot open ${deepLink}`, env)
-  return { strippedElectronRunAsNode }
+  return openDeepLinkUri(deepLink)
 }
 
 export interface CreateEagleLinksServiceOptions {
+  readonly eagle?: FolioEagleService
   readonly apiBaseUrl?: string
-  readonly fetchImpl?: typeof fetch
+  readonly fetchImpl?: FetchLike
   readonly timeoutMs?: number
   readonly openUrlImpl?: (
     deepLink: string,
@@ -240,60 +114,28 @@ export function createEagleLinksService(
   options: CreateEagleLinksServiceOptions = {},
 ): EagleLinksService {
   const apiBaseUrl = (options.apiBaseUrl ?? DEFAULT_EAGLE_API_BASE).replace(/\/+$/, '')
-  const fetchImpl = options.fetchImpl ?? globalThis.fetch
-  const timeoutMs = options.timeoutMs ?? DEFAULT_EAGLE_TIMEOUT_MS
-  const openUrlImpl = options.openUrlImpl ?? openEagleDeepLink
+  const baseUrlOverride = options.apiBaseUrl ? apiBaseUrl : undefined
+  const callOptions = options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : undefined
 
-  const requestEagleJson = async <T>(urlString: string): Promise<T> => {
-    if (typeof fetchImpl !== 'function') {
-      throw new FolioError('eagle_fetch_unavailable', 'fetch is unavailable in host runtime', 500)
-    }
-
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
-    let response: Response
-    try {
-      response = await fetchImpl(urlString, {
-        method: 'GET',
-        signal: controller.signal,
-      })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      throw new FolioError('eagle_api_unreachable', `Eagle Web API request failed: ${msg}`, 502)
-    } finally {
-      clearTimeout(timer)
-    }
-
-    if (!response.ok) {
-      throw new FolioError(
-        'eagle_api_http_error',
-        `Eagle Web API HTTP ${response.status}`,
-        502,
-      )
-    }
-
-    let envelope: EagleEnvelope<T>
-    try {
-      envelope = (await response.json()) as EagleEnvelope<T>
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      throw new FolioError(
-        'eagle_api_invalid_json',
-        `invalid Eagle Web API response: ${msg}`,
-        502,
-      )
-    }
-
-    if (envelope.status !== 'success') {
-      throw new FolioError(
-        'eagle_api_error',
-        envelope.message || 'Eagle Web API returned an error',
-        502,
-      )
-    }
-
-    return envelope.data as T
-  }
+  let lastStrippedElectronRunAsNode = false
+  const eagle: FolioEagleService =
+    options.eagle ??
+    createFolioEagleService({
+      defaultBaseUrl: apiBaseUrl,
+      defaultTimeoutMs: options.timeoutMs,
+      fetchImpl: options.fetchImpl,
+      openDeepLinkImpl: options.openUrlImpl
+        ? async deepLink => {
+            const res = await options.openUrlImpl!(deepLink)
+            lastStrippedElectronRunAsNode = res?.strippedElectronRunAsNode ?? false
+            return res
+          }
+        : async deepLink => {
+            const res = await openDeepLinkUri(deepLink)
+            lastStrippedElectronRunAsNode = res.strippedElectronRunAsNode
+            return res
+          },
+    })
 
   const buildItemApiUrl = (itemId: string): string => {
     const url = new URL(`${apiBaseUrl}/api/v2/item/get`)
@@ -301,34 +143,16 @@ export function createEagleLinksService(
     return url.toString()
   }
 
-  const fetchEagleItem = async (itemId: string): Promise<EagleItemRaw> => {
+  const fetchEagleItem = async (itemId: string): Promise<EagleItemDetail> => {
     const cleanId = itemId.trim()
     if (!isValidEagleItemId(cleanId)) {
       throw new FolioError('invalid_eagle_item_id', 'Eagle item ID is invalid', 400)
     }
 
-    const data = await requestEagleJson<
-      readonly EagleItemRaw[] | { readonly data?: readonly EagleItemRaw[] }
-    >(buildItemApiUrl(cleanId))
-
-    const items = Array.isArray(data)
-      ? data
-      : data && typeof data === 'object' && Array.isArray((data as { data?: unknown }).data)
-        ? (data as { data: readonly EagleItemRaw[] }).data
-        : []
-
-    if (items.length === 0) {
+    const item = await eagle.getItem(cleanId, baseUrlOverride, callOptions)
+    if (!item) {
       throw new FolioError('eagle_item_not_found', 'Eagle item was not found', 404)
     }
-    if (items.length > 1) {
-      throw new FolioError(
-        'eagle_item_ambiguous',
-        'Eagle returned multiple items for one ID',
-        409,
-      )
-    }
-
-    const item = items[0]!
     if (item.isDeleted) {
       throw new FolioError('eagle_item_deleted', 'Eagle item is in the trash', 410)
     }
@@ -336,17 +160,14 @@ export function createEagleLinksService(
   }
 
   const fetchEagleThumbnailPath = async (itemId: string): Promise<string> => {
-    const url = new URL(`${apiBaseUrl}/api/item/thumbnail`)
-    url.searchParams.set('id', itemId.trim())
-    const encodedPath = await requestEagleJson<string>(url.toString())
-    if (typeof encodedPath !== 'string' || !encodedPath.trim()) {
+    const decodedPath = await eagle.getItemThumbnailPath(itemId.trim(), baseUrlOverride, callOptions)
+    if (!decodedPath) {
       throw new FolioError(
         'eagle_thumbnail_unavailable',
         'Eagle thumbnail file is unavailable',
         404,
       )
     }
-    const decodedPath = safeDecodePercent(encodedPath)
     const normalized = normalizeEagleLocalPath(decodedPath)
     let st: fs.Stats
     try {
@@ -369,7 +190,7 @@ export function createEagleLinksService(
   }
 
   const resolveOriginalFromItem = async (
-    item: EagleItemRaw,
+    item: EagleItemDetail,
     thumbnailPath: string,
   ): Promise<string> => {
     if (item.noThumbnail) {
@@ -432,40 +253,21 @@ export function createEagleLinksService(
     const cleanIds = (folderIds ?? []).map(id => id.trim()).filter(Boolean)
     if (cleanIds.length === 0) return []
 
-    const url = new URL(`${apiBaseUrl}/api/v2/folder/get`)
-    url.searchParams.set('ids', cleanIds.join(','))
-    const data = await requestEagleJson<
-      readonly EagleFolderRaw[] | { readonly data?: readonly EagleFolderRaw[] }
-    >(url.toString())
-
-    const roots = Array.isArray(data)
-      ? data
-      : data && typeof data === 'object' && Array.isArray((data as { data?: unknown }).data)
-        ? (data as { data: readonly EagleFolderRaw[] }).data
-        : []
-
-    const wanted = new Set(cleanIds)
-    const seen = new Set<string>()
+    const uniqueIds = Array.from(new Set(cleanIds))
+    const resolved: Array<EagleFolderInfo | null> = await Promise.all(
+      uniqueIds.map(id => eagle.getFolder(id, baseUrlOverride, callOptions)),
+    )
     const result: EagleFolderSource[] = []
-
-    const flatten = (nodes: readonly EagleFolderRaw[]) => {
-      for (const node of nodes) {
-        if (wanted.has(node.id) && !seen.has(node.id)) {
-          seen.add(node.id)
-          result.push({ id: node.id, name: node.name })
-        }
-        if (Array.isArray(node.children) && node.children.length > 0) {
-          flatten(node.children)
-        }
+    for (const folder of resolved) {
+      if (folder) {
+        result.push({ id: folder.id, name: folder.name })
       }
     }
-
-    flatten(roots)
     return result
   }
 
   const buildImageSource = async (
-    item: EagleItemRaw,
+    item: EagleItemDetail,
     originalPath: string,
     thumbnailPath: string,
   ): Promise<EagleImageSource> => {
@@ -507,7 +309,7 @@ export function createEagleLinksService(
 
     async resolveByItemId(rawIdOrDeepLink: string): Promise<EagleImageSource> {
       const trimmed = rawIdOrDeepLink.trim()
-      const itemId = extractEagleItemIdFromDeepLink(trimmed) ?? trimmed
+      const itemId = eagle.extractItemIdFromDeepLink(trimmed) ?? trimmed
       if (!isValidEagleItemId(itemId)) {
         throw new FolioError('invalid_eagle_item_id', 'Eagle item ID is invalid', 400)
       }
@@ -522,19 +324,23 @@ export function createEagleLinksService(
 
     async openItem(rawIdOrDeepLink: string): Promise<EagleOpenItemResult> {
       const trimmed = rawIdOrDeepLink.trim()
-      const itemId = extractEagleItemIdFromDeepLink(trimmed) ?? trimmed
+      const itemId = eagle.extractItemIdFromDeepLink(trimmed) ?? trimmed
       if (!isValidEagleItemId(itemId)) {
         throw new FolioError('invalid_eagle_item_id', 'Eagle item ID is invalid', 400)
       }
 
       const deepLink = `eagle://item/${itemId}`
       const startedAt = Date.now()
-      const result = await openUrlImpl(deepLink)
+      lastStrippedElectronRunAsNode = false
+      await eagle.openDeepLink(deepLink)
+      const stripped = options.eagle
+        ? buildCleanLaunchEnv().strippedElectronRunAsNode
+        : lastStrippedElectronRunAsNode
       return {
         itemId,
         deepLink,
         durationMs: Date.now() - startedAt,
-        strippedElectronRunAsNode: result?.strippedElectronRunAsNode ?? false,
+        strippedElectronRunAsNode: stripped,
       }
     },
   }

@@ -1,4 +1,8 @@
 import * as React from 'react'
+import {
+  CollectionLightbox,
+  useVirtualGroupedGrid,
+} from '@folio/base-collection-ui/client'
 import type { FrameViewProps } from '@folio/base-contract'
 import {
   AlertTriangle,
@@ -23,8 +27,6 @@ import {
   EmptyMedia,
   EmptyTitle,
   Input,
-  Lightbox,
-  LightboxContent,
   Select,
   SelectContent,
   SelectItem,
@@ -40,8 +42,13 @@ import {
   filterAndSortGroups,
   formatBytes,
 } from '../format.js'
-import type { CardZoom, CategoryFilter, ProjectFileEntry, SortMode } from '../types.js'
-import { useVirtualGroupedGrid } from '../virtual.js'
+import type {
+  CardZoom,
+  CategoryFilter,
+  ProjectFileEntry,
+  ProjectFolderGroup,
+  SortMode,
+} from '../types.js'
 import { LazyThumbImage } from './LazyThumbImage.js'
 
 const ZOOM_DIMENSIONS: Record<CardZoom, { minWidth: number; rowHeight: number; thumbH: string }> = {
@@ -96,8 +103,10 @@ export function ProjectsMain(_props: FrameViewProps): React.ReactElement {
 
   const zoomCfg = ZOOM_DIMENSIONS[cardZoom]
   const { containerRef, columnCount, totalHeight, visibleRows, activeStickyGroup } =
-    useVirtualGroupedGrid<HTMLDivElement>({
+    useVirtualGroupedGrid<ProjectFolderGroup, ProjectFileEntry, HTMLDivElement>({
       groups: filteredGroups,
+      getGroupKey: g => g.relPath,
+      getGroupItems: g => g.files,
       collapsedKeys: collapsedGroups,
       minCardWidth: zoomCfg.minWidth,
       rowHeight: zoomCfg.rowHeight,
@@ -414,7 +423,7 @@ export function ProjectsMain(_props: FrameViewProps): React.ReactElement {
                       paddingTop: '10px',
                     }}
                   >
-                    {row.files.map(file => {
+                    {row.items.map(file => {
                       const isSelected = selectedFile?.relPath === file.relPath
                       const thumbSrc = file.thumbSupported
                         ? buildProjectThumbUrl(
@@ -470,24 +479,11 @@ export function ProjectsMain(_props: FrameViewProps): React.ReactElement {
       </div>
 
       {/* Image Lightbox */}
-      <Lightbox
-        items={[...lightbox.items]}
-        open={lightbox.open}
-        index={lightbox.index}
+      <CollectionLightbox
+        state={lightbox}
         onOpenChange={setLightboxOpen}
         onIndexChange={setLightboxIndex}
-      >
-        <LightboxContent
-          labels={{
-            zoomIn: '放大',
-            zoomOut: '缩小',
-            close: '关闭',
-            previous: '上一张',
-            next: '下一张',
-            image: (i, count) => `图片 ${i + 1} / ${count}`,
-          }}
-        />
-      </Lightbox>
+      />
     </div>
   )
 }

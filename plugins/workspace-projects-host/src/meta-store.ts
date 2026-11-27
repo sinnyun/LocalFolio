@@ -1,7 +1,11 @@
 import crypto from 'node:crypto'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import type { FolioNativeService, PluginStorageNamespace } from '@folio/base-contract'
+import type {
+  FolioFsService,
+  FolioNativeService,
+  PluginStorageNamespace,
+} from '@folio/base-contract'
 import { META_DIR_NAME, computeProjectId, isPathInside } from './classify.js'
 import { ProjectManifestSchema, type ProjectManifest } from './types.js'
 
@@ -75,7 +79,10 @@ export interface ProjectMetaStore {
 export function createProjectMetaStore(
   storage: PluginStorageNamespace,
   native: FolioNativeService,
+  fsService?: FolioFsService,
 ): ProjectMetaStore {
+  const writeFileAtomic = (targetPath: string, data: string | Buffer): Promise<void> =>
+    fsService ? fsService.writeAtomicFile(targetPath, data) : writeAtomicFile(targetPath, data)
   const getInPlaceMetaDir = (projectPath: string): string => path.join(projectPath, META_DIR_NAME)
   const getFallbackMetaDir = (projectId: string): string =>
     storage.cachePath('fallback-meta', projectId)
@@ -152,14 +159,14 @@ export function createProjectMetaStore(
       try {
         const metaDir = await ensureInPlaceMetaDir(projectPath, options.hideMetaDir ?? true)
         const manifestPath = path.join(metaDir, 'manifest.json')
-        await writeAtomicFile(manifestPath, json)
+        await writeFileAtomic(manifestPath, json)
         return { metaWritable: true, manifestPath }
       } catch (err) {
         if (!isReadOnlyError(err)) {
           // Even unexpected permission failures fall back cleanly if possible
         }
         const fallbackPath = path.join(getFallbackMetaDir(manifest.projectId), 'manifest.json')
-        await writeAtomicFile(fallbackPath, json)
+        await writeFileAtomic(fallbackPath, json)
         return { metaWritable: false, manifestPath: fallbackPath }
       }
     },
@@ -200,13 +207,13 @@ export function createProjectMetaStore(
       try {
         const metaDir = await ensureInPlaceMetaDir(projectPath, options.hideMetaDir ?? true)
         const coverPath = path.join(metaDir, safeName)
-        await writeAtomicFile(coverPath, buffer)
+        await writeFileAtomic(coverPath, buffer)
         await removeOldCoverIfNeeded(metaDir, safeName, previousFileName)
         return { metaWritable: true, fullPath: coverPath }
       } catch {
         const fallbackDir = getFallbackMetaDir(projectId)
         const fallbackCoverPath = path.join(fallbackDir, safeName)
-        await writeAtomicFile(fallbackCoverPath, buffer)
+        await writeFileAtomic(fallbackCoverPath, buffer)
         await removeOldCoverIfNeeded(fallbackDir, safeName, previousFileName)
         return { metaWritable: false, fullPath: fallbackCoverPath }
       }
@@ -248,14 +255,14 @@ export function createProjectMetaStore(
         if (!thumbPath) {
           throw new Error(`Invalid thumbnail relative path: ${relPosixPath}`)
         }
-        await writeAtomicFile(thumbPath, buffer)
+        await writeFileAtomic(thumbPath, buffer)
         return { metaWritable: true, fullPath: thumbPath }
       } catch {
         const fallbackThumbsRoot = path.join(getFallbackMetaDir(projectId), 'thumbs')
         const fallbackThumbPath =
           resolveSubPath(fallbackThumbsRoot, relPosixPath) ??
           path.join(fallbackThumbsRoot, path.basename(relPosixPath))
-        await writeAtomicFile(fallbackThumbPath, buffer)
+        await writeFileAtomic(fallbackThumbPath, buffer)
         return { metaWritable: false, fullPath: fallbackThumbPath }
       }
     },

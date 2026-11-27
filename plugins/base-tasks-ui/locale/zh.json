@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "基础后台任务界面",
+    "description": "提供多作用域后台任务 SSE 订阅 Hook（useFolioTasks）与统一底栏任务进度控制条（TaskStatusBar），配套 @folio/base-tasks-host 使用。",
+    "detail": "docs/DETAIL.md"
+  }
+}

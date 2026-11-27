@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
@@ -356,50 +355,4 @@ export async function inspectFile(targetRawPath: string): Promise<FileInspectRes
     mediaUrl,
     thumbUrl,
   }
-}
-
-function launchDetached(command: string, args: readonly string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: false,
-    })
-    const onError = (err: Error): void => {
-      reject(new FolioError('reveal_failed', `无法打开系统资源管理器: ${err.message}`, 500))
-    }
-    child.once('error', onError)
-    child.once('spawn', () => {
-      child.off('error', onError)
-      child.unref()
-      resolve()
-    })
-  })
-}
-
-export async function revealInExplorer(targetRawPath: string): Promise<{ readonly revealedPath: string }> {
-  const targetPath = normalizeBrowsePath(targetRawPath)
-  if (!targetPath) {
-    throw new FolioError('invalid_path', '目标路径不能为空', 400)
-  }
-
-  let st: fs.Stats
-  try {
-    st = await fsp.stat(targetPath)
-  } catch (error) {
-    throw mapFsError(error, targetPath)
-  }
-
-  const isDir = st.isDirectory()
-  if (process.platform === 'win32') {
-    const args = isDir ? [targetPath] : [`/select,${targetPath}`]
-    await launchDetached('explorer.exe', args)
-  } else if (process.platform === 'darwin') {
-    const args = isDir ? [targetPath] : ['-R', targetPath]
-    await launchDetached('open', args)
-  } else {
-    await launchDetached('xdg-open', [isDir ? targetPath : path.dirname(targetPath)])
-  }
-
-  return { revealedPath: targetPath }
 }

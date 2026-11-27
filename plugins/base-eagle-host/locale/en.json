@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Base Eagle Service",
+    "description": "Provides a unified local Eagle Web API client (127.0.0.1:41595) with timeout/abort handling, JSON envelope validation, thumbnail path decoding, and cross-platform eagle:// deep-link launching (ctx.folioEagle).",
+    "detail": "./docs/DETAIL.md"
+  }
+}

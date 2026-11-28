@@ -1,19 +1,33 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
-import { defineAction, type FolioRuntimeService } from '@folio/base-contract'
+import {
+  defineAction,
+  type FolioRuntimeService,
+  type FolioStorageService,
+} from '@folio/base-contract'
 import { createFolioTasksService, type ManagedFolioTasksService } from './task-manager.js'
+import { createTaskLedger } from './task-ledger.js'
 
 export interface RegisterBaseTasksHostOptions {
   readonly runtime: FolioRuntimeService
+  readonly storage?: FolioStorageService
   readonly throttleMs?: number
+  readonly persistDebounceMs?: number
 }
 
 export function registerBaseTasksHost(options: RegisterBaseTasksHostOptions): {
   readonly service: ManagedFolioTasksService
+  readonly ready: Promise<void>
   dispose(): void
 } {
-  const { runtime, throttleMs } = options
-  const service = createFolioTasksService({ runtime, throttleMs })
+  const { runtime, storage, throttleMs, persistDebounceMs } = options
+  const service = createFolioTasksService({
+    runtime,
+    ...(throttleMs !== undefined ? { throttleMs } : {}),
+    ...(persistDebounceMs !== undefined ? { persistDebounceMs } : {}),
+    ...(storage ? { ledger: createTaskLedger(storage) } : {}),
+  })
+  const ready = service.hydrate().catch(() => {})
 
   const disposers = [
     runtime.registerAction(
@@ -33,6 +47,27 @@ export function registerBaseTasksHost(options: RegisterBaseTasksHostOptions): {
     ),
     runtime.registerAction(
       defineAction({
+        id: 'tasks.items',
+        title: '查询后台任务的子项明细',
+        tier: 'read',
+        input: z.object({
+          id: z.string().min(1),
+          status: z
+            .enum(['pending', 'running', 'succeeded', 'failed', 'cancelled', 'skipped', 'unfinished', 'all'])
+            .optional(),
+          offset: z.number().int().min(0).optional(),
+          limit: z.number().int().min(1).max(1000).optional(),
+        }),
+        run: input =>
+          service.listTaskItems(input.id, {
+            ...(input.status ? { status: input.status } : {}),
+            ...(input.offset !== undefined ? { offset: input.offset } : {}),
+            ...(input.limit !== undefined ? { limit: input.limit } : {}),
+          }),
+      }),
+    ),
+    runtime.registerAction(
+      defineAction({
         id: 'tasks.pause',
         title: '暂停后台任务',
         tier: 'modify',
@@ -45,12 +80,23 @@ export function registerBaseTasksHost(options: RegisterBaseTasksHostOptions): {
     runtime.registerAction(
       defineAction({
         id: 'tasks.resume',
-        title: '恢复后台任务',
+        title: '继续后台任务',
         tier: 'modify',
         input: z.object({
           id: z.string().min(1),
         }),
         run: input => service.resumeTask(input.id),
+      }),
+    ),
+    runtime.registerAction(
+      defineAction({
+        id: 'tasks.stop',
+        title: '停止后台任务并保留未完成项',
+        tier: 'modify',
+        input: z.object({
+          id: z.string().min(1),
+        }),
+        run: input => service.stopTask(input.id),
       }),
     ),
     runtime.registerAction(
@@ -62,6 +108,19 @@ export function registerBaseTasksHost(options: RegisterBaseTasksHostOptions): {
           id: z.string().min(1),
         }),
         run: input => service.cancelTask(input.id),
+      }),
+    ),
+    runtime.registerAction(
+      defineAction({
+        id: 'tasks.retry',
+        title: '重试后台任务的选中子项',
+        tier: 'modify',
+        input: z.object({
+          id: z.string().min(1),
+          itemKeys: z.array(z.string().min(1)).optional(),
+        }),
+        run: input =>
+          service.retryTaskItems(input.id, input.itemKeys ? [...input.itemKeys] : undefined),
       }),
     ),
     runtime.registerAction(
@@ -83,6 +142,7 @@ export function registerBaseTasksHost(options: RegisterBaseTasksHostOptions): {
 
   return {
     service,
+    ready,
     dispose(): void {
       for (const d of disposers.reverse()) d()
       service.dispose()
@@ -91,13 +151,15 @@ export function registerBaseTasksHost(options: RegisterBaseTasksHostOptions): {
 }
 
 export const name = 'base-tasks-host'
-export const inject = ['folioRuntime'] as const
+export const inject = ['folioRuntime', 'folioStorage'] as const
 
 export function apply(ctx: Context): void {
   ctx.effect(() => {
-    const { service, dispose } = registerBaseTasksHost({
+    const { service, dispose, ready } = registerBaseTasksHost({
       runtime: ctx.folioRuntime,
+      storage: ctx.folioStorage,
     })
+    void ready
     const disposeProvide = ctx.provide('folioTasks', service)
     return () => {
       disposeProvide()
@@ -111,4 +173,6 @@ export default { name, inject, apply }
 export { createBoundedQueue } from './queue.js'
 export { runNodeWorker } from './worker-runner.js'
 export { createFolioTasksService } from './task-manager.js'
+export { createTaskLedger } from './task-ledger.js'
 export type { ManagedFolioTasksService } from './task-manager.js'
+export type { PersistedTaskRecord, PersistedTasksFile, TaskLedger } from './task-ledger.js'

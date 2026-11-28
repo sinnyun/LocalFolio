@@ -218,6 +218,7 @@ export interface ProjectsContextValue {
   openProjectContextMenu(project: ProjectSummary, clientX: number, clientY: number): void
   pauseTask(taskId: string): Promise<void>
   resumeTask(taskId: string): Promise<void>
+  stopTask(taskId: string): Promise<void>
   cancelTask(taskId: string): Promise<void>
   clearFinishedTasks(): Promise<void>
   refreshIndex(): Promise<void>
@@ -441,6 +442,7 @@ export function ProjectsProvider({
     trackTask,
     pauseTask,
     resumeTask,
+    stopTask,
     cancelTask,
     clearFinishedTasks,
   } = useFolioTasks({
@@ -1141,6 +1143,7 @@ export function ProjectsProvider({
     openProjectContextMenu,
     pauseTask,
     resumeTask,
+    stopTask,
     cancelTask,
     clearFinishedTasks: () => clearFinishedTasks(),
     refreshIndex: indexQuery.refetch,

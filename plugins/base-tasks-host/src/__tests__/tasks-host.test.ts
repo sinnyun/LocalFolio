@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createFolioTasksService } from '../task-manager.js'
+import { createTaskLedger } from '../task-ledger.js'
 import { createFolioRuntimeService } from '../../../base-runtime-host/src/host.js'
 import { createFolioStorageService } from '../../../base-storage-host/src/host.js'
 import { registerBaseTasksHost } from '../host.js'
@@ -212,5 +213,231 @@ describe('@folio/base-tasks-host', () => {
 
     dispose()
     runtime.dispose()
+  })
+
+  it('tracks item-level results for observe activities', async () => {
+    const tasks = createFolioTasksService({
+      runtime: { events: { emitEvent() {} } } as unknown as Parameters<typeof createFolioTasksService>[0]['runtime'],
+    })
+    try {
+      await tasks.observe(
+        { scope: 'demo', key: 'activity', title: '活动', item: 'a.jpg', isSuccessful: Boolean },
+        async () => true,
+      )
+      await tasks.observe(
+        {
+          scope: 'demo',
+          key: 'activity',
+          title: '活动',
+          item: 'b.jpg',
+          isSuccessful: Boolean,
+          retry: { kind: 'activity-retry' },
+        },
+        async () => null,
+      )
+      await new Promise(resolve => setTimeout(resolve, 340))
+      const snap = tasks.listTasks('demo')[0]!
+      expect(snap.items).toMatchObject({ total: 2, succeeded: 1, failed: 1 })
+      expect(tasks.listTaskItems(snap.id, { status: 'failed' }).items.map(item => item.key)).toEqual([
+        'b.jpg',
+      ])
+    } finally {
+      tasks.dispose()
+    }
+  })
+
+  it('tracks per-item results and retries selected failed items through the registered handler', async () => {
+    const tasks = createFolioTasksService({
+      runtime: { events: { emitEvent() {} } } as unknown as Parameters<typeof createFolioTasksService>[0]['runtime'],
+    })
+    const requested: string[][] = []
+    const disposeHandler = tasks.registerRetryHandler({
+      kind: 'demo-retry',
+      retry: ({ task, items }) => {
+        requested.push(items.map(item => item.key))
+        const retry = tasks.enqueue({
+          scope: 'demo',
+          title: '重试失败项',
+          retryOf: task.id,
+          retry: { kind: 'demo-retry' },
+          run: async () => 'retried',
+        })
+        return retry.snapshot()
+      },
+    })
+    try {
+      const handle = tasks.enqueue({
+        scope: 'demo',
+        title: '批量处理',
+        retry: { kind: 'demo-retry' },
+        run: async helpers => {
+          helpers.items.define([
+            { key: 'a', label: 'A' },
+            { key: 'b', label: 'B' },
+            { key: 'c', label: 'C' },
+          ])
+          for (const [key, ok] of [['a', true], ['b', false], ['c', false]] as const) {
+            await helpers.items.checkpoint()
+            helpers.items.begin(key)
+            if (ok) helpers.items.succeed(key)
+            else helpers.items.fail(key, '生成失败')
+          }
+          return 'done'
+        },
+      })
+      await handle.done
+
+      expect(tasks.getTask(handle.id)).toMatchObject({
+        status: 'completed',
+        items: { total: 3, succeeded: 1, failed: 2, pending: 0 },
+        retryable: true,
+      })
+      expect(tasks.listTaskItems(handle.id, { status: 'failed' }).items.map(item => item.key)).toEqual([
+        'b',
+        'c',
+      ])
+
+      const result = await tasks.retryTaskItems(handle.id, ['b'])
+      expect(result.retried).toBe(1)
+      expect(result.task?.title).toBe('重试失败项')
+      expect(requested).toEqual([['b']])
+      expect(
+        tasks.listTaskItems(handle.id).items.find(item => item.key === 'b')?.retriedBy,
+      ).toBe(result.task?.id)
+      expect(
+        tasks.listTaskItems(handle.id).items.find(item => item.key === 'c')?.retriedBy,
+      ).toBeUndefined()
+    } finally {
+      disposeHandler()
+      tasks.dispose()
+    }
+  })
+
+  it('stops a batch with unfinished items and continues them through a retry task', async () => {
+    const tasks = createFolioTasksService({
+      runtime: { events: { emitEvent() {} } } as unknown as Parameters<typeof createFolioTasksService>[0]['runtime'],
+    })
+    const disposeHandler = tasks.registerRetryHandler({
+      kind: 'stop-resume',
+      retry: ({ task, items }) => {
+        expect(items.map(item => item.key)).toEqual(['b', 'c', 'd'])
+        const retry = tasks.enqueue({
+          scope: 'demo',
+          title: '继续处理',
+          retryOf: task.id,
+          retry: { kind: 'stop-resume' },
+          run: async () => 'ok',
+        })
+        return retry.snapshot()
+      },
+    })
+    try {
+      const handle = tasks.enqueue({
+        scope: 'demo',
+        title: '可停止批处理',
+        retry: { kind: 'stop-resume' },
+        run: async helpers => {
+          helpers.items.define([
+            { key: 'a' }, { key: 'b' }, { key: 'c' }, { key: 'd' },
+          ])
+          for (const key of ['a', 'b', 'c', 'd']) {
+            await helpers.items.checkpoint()
+            helpers.items.begin(key)
+            await new Promise(resolve => setTimeout(resolve, 100))
+            helpers.items.succeed(key)
+          }
+          return 'done'
+        },
+      })
+
+      for (let i = 0; i < 100; i += 1) {
+        if (tasks.getTask(handle.id)?.items?.succeeded === 1) break
+        await new Promise(resolve => setTimeout(resolve, 5))
+      }
+      const stopped = tasks.stopTask(handle.id)
+      expect(stopped.status).toBe('stopped')
+      expect(stopped.items).toMatchObject({ succeeded: 1, pending: 3 })
+      await expect(handle.done).rejects.toMatchObject({ name: 'AbortError' })
+      // History cleanup must not discard a stopped task that can still continue.
+      expect(tasks.clearFinished('demo')).toBe(0)
+
+      const resumed = await tasks.resumeTask(handle.id)
+      expect(resumed.status).toBe('stopped')
+      const sourceItems = tasks.listTaskItems(handle.id).items
+      expect(sourceItems.filter(item => item.retriedBy).length).toBeGreaterThan(0)
+    } finally {
+      disposeHandler()
+      tasks.dispose()
+    }
+  })
+
+  it('persists task history and converts unfinished tasks to interrupted on restart', async () => {
+    const dataDir = await makeTempDir()
+    const storage = createFolioStorageService({ dataDir })
+    const runtime = createFolioRuntimeService({
+      storage,
+      admit: () => true,
+      trustedOrigins: [],
+    })
+
+    const first = createFolioTasksService({
+      runtime,
+      ledger: createTaskLedger(storage),
+      persistDebounceMs: 100,
+    })
+    await first.hydrate()
+    const finished = first.enqueue({
+      scope: 'persist',
+      title: '已完成批处理',
+      retry: { kind: 'persist-retry' },
+      run: async helpers => {
+        helpers.items.define([{ key: 'ok' }, { key: 'bad' }])
+        helpers.items.begin('ok')
+        helpers.items.succeed('ok')
+        helpers.items.begin('bad')
+        helpers.items.fail('bad', '坏了')
+        return 'done'
+      },
+    })
+    await finished.done
+
+    let release: () => void = () => {}
+    const running = first.enqueue({
+      scope: 'persist',
+      title: '未完成任务',
+      run: async () => {
+        await new Promise<void>(resolve => {
+          release = resolve
+        })
+        return 'late'
+      },
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await first.flush()
+    const runningId = running.id
+    first.dispose()
+    release()
+
+    const second = createFolioTasksService({
+      runtime,
+      ledger: createTaskLedger(storage),
+      persistDebounceMs: 100,
+    })
+    try {
+      await second.hydrate()
+      const finishedSnap = second.getTask(finished.id)
+      expect(finishedSnap).toMatchObject({
+        status: 'completed',
+        items: { total: 2, succeeded: 1, failed: 1 },
+      })
+      expect(second.listTaskItems(finished.id, { status: 'failed' }).items[0]?.key).toBe('bad')
+
+      const interrupted = second.getTask(runningId)
+      expect(interrupted).toMatchObject({ status: 'interrupted' })
+      expect(interrupted?.error).toContain('应用退出')
+    } finally {
+      second.dispose()
+      runtime.dispose()
+    }
   })
 })

@@ -9,6 +9,7 @@ export interface TaskStatusBarProps {
   readonly recentFinishedTask?: TaskSnapshot | null
   readonly onPause: (taskId: string) => void | Promise<unknown>
   readonly onResume: (taskId: string) => void | Promise<unknown>
+  readonly onStop?: (taskId: string) => void | Promise<unknown>
   readonly onCancel: (taskId: string) => void | Promise<unknown>
   readonly onClearFinished: () => void | Promise<unknown>
   readonly idleContent?: React.ReactNode
@@ -27,8 +28,20 @@ function isTerminalTask(task: TaskSnapshot | null | undefined): task is TaskSnap
   return (
     task !== null &&
     task !== undefined &&
-    (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled')
+    (task.status === 'completed' ||
+      task.status === 'failed' ||
+      task.status === 'cancelled' ||
+      task.status === 'stopped' ||
+      task.status === 'interrupted')
   )
+}
+
+function terminalLabel(task: TaskSnapshot): string {
+  if (task.status === 'completed') return '已完成'
+  if (task.status === 'cancelled') return '已取消'
+  if (task.status === 'stopped') return '已停止'
+  if (task.status === 'interrupted') return '已中断'
+  return '失败'
 }
 
 export function TaskStatusBar({
@@ -37,6 +50,7 @@ export function TaskStatusBar({
   recentFinishedTask,
   onPause,
   onResume,
+  onStop,
   onCancel,
   onClearFinished,
   idleContent,
@@ -99,14 +113,25 @@ export function TaskStatusBar({
             )
           ) : null}
           {activeTask.cancellable ? (
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-destructive hover:bg-muted"
-              onClick={() => void onCancel(activeTask.id)}
-            >
-              <Square size={11} />
-              取消
-            </button>
+            onStop ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-destructive hover:bg-muted"
+                onClick={() => void onStop(activeTask.id)}
+              >
+                <Square size={11} />
+                停止
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-destructive hover:bg-muted"
+                onClick={() => void onCancel(activeTask.id)}
+              >
+                <Square size={11} />
+                取消
+              </button>
+            )
           ) : null}
         </div>
       </div>
@@ -131,13 +156,7 @@ export function TaskStatusBar({
       {finishedTask ? (
         <div className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px]">
           <span className="truncate text-muted-foreground">
-            最近任务：{finishedTask.title}（
-            {finishedTask.status === 'completed'
-              ? '已完成'
-              : finishedTask.status === 'cancelled'
-                ? '已取消'
-                : '失败'}
-            ）
+            最近任务：{finishedTask.title}（{terminalLabel(finishedTask)}）
           </span>
           <button
             type="button"

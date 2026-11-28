@@ -6,9 +6,14 @@ LocalFolio 的能力演进记录。可安装的归档与发布说明见 [GitHub 
 
 ---
 
-## Unreleased
+## 0.3.0-alpha.12
 
-- 新增 `release.bat` 一键发布脚本：自动递增版本、同步根 `package.json` 与 `bundles/workbench-suite/package.json`、把本段的 `## Unreleased` 改成新版本、跑 `pnpm run verify`、提交打标签推送，并等待 GitHub Actions 结束后打印 Release 与安装包直链。脚本只输出 ASCII，避免 `cmd.exe` 代码页乱码；`--dry-run` 可先看计划，`RELEASE_MSG` 可覆盖默认提交信息。
+- 任务监控工作区改为持久化任务账本：`@folio/base-tasks-host` 把任务历史、子项状态与未完成项写入 `plugins/base-tasks-host/data/tasks.json`，重启后历史仍可查看，上次未完成的任务恢复为「已中断」并可继续或重试；监控页的工作区 / 项目 / 状态筛选、搜索词和展开状态写入 `localStorage['folio.monitor.v1']`。
+- 完善任务控制语义：新增 `tasks.stop`（停止并保留未完成项）、`stopped` / `interrupted` 状态与 `tasks.retry`（按子项重试）；`pause` / `resume` / `stop` / `cancel` 统一经 RPC 与 SSE 同步。暂停在子项边界协作等待，停止会中止当前子项并保留待处理项，继续时由生产者注册的重试处理器把未完成项交给新任务。
+- 后台任务支持子项明细：`TaskRunHelpers.items` 可登记 `{ key, label }` 并逐项报告成功 / 失败 / 取消 / 跳过；`observe` 的 `item` 自动累计子项。任务快照新增 `items` 汇总、`retryable` / `resumable` 与 `retryOf`，新增 `tasks.items` 分页动作。
+- 缩略图链路接入子项与单独重试：Eagle 补图（`thumbs.eagle.generate`）、自动缩略图批量（`thumbs.auto.batch`）、项目缩略图活动与归档补图（`archive.project.rebuildThumbs`）现在逐文件记录状态，失败文件可在监控页单选或批量重试；项目 AI 批量提取与批量增量更新也按项目登记子项并支持重试，批量增量更新单个项目失败时改为记录失败项并继续处理其余项目，不再中止整批。
+- 重做任务监控 UI：分段进度条区分成功 / 失败 / 跳过 / 取消 / 处理中，显示耗时、按速率估算的剩余时间、最近错误与重试血缘；任务展开后可按「全部 / 失败 / 未完成 / 成功」浏览子项，支持全选失败项、重试选中、重试全部失败与逐行重试。没有子项账本的旧任务会显示说明，并在生产者注册重试处理器时按整个范围重试（项目缩略图会重新检查项目内全部支持文件）。底栏 `TaskStatusBar` 同步支持「停止」与新状态。
+- 新增 `release.bat` 一键发布脚本：自动递增版本、同步根 `package.json` 与 `bundles/workbench-suite/package.json`、把本段的 `## 0.3.0-alpha.12` 改成新版本、跑 `pnpm run verify`、提交打标签推送，并等待 GitHub Actions 结束后打印 Release 与安装包直链。脚本只输出 ASCII，避免 `cmd.exe` 代码页乱码；`--dry-run` 可先看计划，`RELEASE_MSG` 可覆盖默认提交信息。
 
 ---
 

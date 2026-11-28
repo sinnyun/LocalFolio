@@ -570,7 +570,159 @@ export function createWorkspaceProjectsHost(
     return handle.snapshot()
   }
 
+  const enqueueProjectThumbRetry = (input: {
+    readonly projectId: string
+    readonly relPaths?: readonly string[]
+    readonly retryOf?: string
+  }) => {
+    const requested = input.relPaths ? [...input.relPaths] : null
+    return tasks.enqueue({
+      scope: 'projects',
+      queue: 'projects-thumbs',
+      concurrency: 2,
+      pausable: true,
+      retry: {
+        kind: 'projects-thumbs',
+        params: { projectId: input.projectId },
+      },
+      ...(input.retryOf ? { retryOf: input.retryOf } : {}),
+      title: requested
+        ? `重试项目缩略图（${requested.length} 个文件）`
+        : '重试项目全部缩略图',
+      meta: {
+        projectId: input.projectId,
+        mode: 'projects-thumbs-retry',
+        ...(requested ? {} : { wholeProject: true }),
+      },
+      run: async helpers => {
+        const summary = await resolveProjectById(input.projectId)
+        if (!summary) {
+          throw new FolioError('project_not_found', '项目不存在', 404)
+        }
+        let manifest = await metaStore.readManifest(summary.path, summary.id)
+        if (!manifest) {
+          const scanRes = await runScanInWorker(summary.path, null, helpers.signal)
+          manifest = { ...scanRes.manifest, projectId: summary.id, name: summary.name }
+          await metaStore.writeManifest(summary.path, manifest)
+        }
+        const files = new Map(
+          manifest.groups.flatMap(group => group.files).map(file => [file.relPath, file]),
+        )
+        const relPaths =
+          requested ??
+          manifest.groups
+            .flatMap(group => group.files)
+            .filter(file => file.thumbSupported)
+            .map(file => file.relPath)
+        helpers.items.define(
+          relPaths.map(relPath => ({
+            key: relPath,
+            label: files.get(relPath)?.name ?? path.basename(relPath),
+          })),
+        )
+        let succeeded = 0
+        let failed = 0
+        let lastError: string | null = null
+        for (const relPath of relPaths) {
+          await helpers.items.checkpoint()
+          const file = files.get(relPath)
+          if (!file) {
+            helpers.items.fail(relPath, '文件已不在项目清单中')
+            failed += 1
+            lastError = `${relPath}：文件已不在项目清单中`
+            continue
+          }
+          helpers.items.begin(relPath)
+          try {
+            const rendered = await thumbService.ensureThumb(
+              summary.path,
+              summary.id,
+              relPath,
+              file.thumbKey,
+              {
+                signal: helpers.signal,
+                hideMetaDir: true,
+              },
+            )
+            if (!rendered || rendered.buffer.length === 0) {
+              throw new Error('未生成缩略图')
+            }
+            helpers.items.succeed(relPath)
+            succeeded += 1
+          } catch (err) {
+            helpers.throwIfAborted()
+            const message = err instanceof Error ? err.message : String(err)
+            helpers.items.fail(relPath, message)
+            failed += 1
+            lastError = `${relPath}：${message}`
+          }
+        }
+        runtime.events.emitInvalidate('projects', input.projectId)
+        if (succeeded === 0 && lastError) {
+          throw new FolioError('projects_thumbs_failed', lastError, 422)
+        }
+        return { succeeded, failed }
+      },
+    })
+  }
+
   const disposers = [
+    tasks.registerRetryHandler({
+      kind: 'projects-thumbs',
+      retry: ({ task, items, wholeTask }) => {
+        const params = task.retry?.params ?? {}
+        const projectId =
+          typeof params.projectId === 'string'
+            ? params.projectId
+            : typeof task.meta?.projectId === 'string'
+              ? task.meta.projectId
+              : ''
+        if (!projectId) {
+          throw new FolioError('task_retry_invalid', '缩略图任务缺少项目标识', 400)
+        }
+        return enqueueProjectThumbRetry({
+          projectId,
+          ...(!wholeTask && items.length > 0
+            ? { relPaths: items.map(item => item.key) }
+            : {}),
+          retryOf: task.id,
+        }).snapshot()
+      },
+    }),
+
+    tasks.registerRetryHandler({
+      kind: 'projects-ai-batch',
+      retry: async ({ task, items }) => {
+        const params = task.retry?.params ?? {}
+        const res = await runtime.executeAction<{ task: TaskSnapshot | null; total: number }>(
+          'projects.ai.extractBatch',
+          {
+            projectIds: items.map(item => item.key),
+            applyCover: params.applyCover !== false,
+            retryOf: task.id,
+            ...(typeof params.provider === 'string' ? { provider: params.provider } : {}),
+            ...(typeof params.model === 'string' ? { model: params.model } : {}),
+          },
+        )
+        return res.task
+      },
+    }),
+
+    tasks.registerRetryHandler({
+      kind: 'projects-batch-sync',
+      retry: async ({ task, items }) => {
+        const res = await runtime.executeAction<{ task: TaskSnapshot | null; total: number }>(
+          'projects.batch.sync',
+          {
+            projectIds: items.map(item => item.key),
+            onlyChanged: false,
+            retryOf: task.id,
+          },
+        )
+        return res.task
+      },
+    }),
+
     runtime.registerAction(
       defineAction({
         id: 'projects.libraries.list',
@@ -1102,6 +1254,7 @@ export function createWorkspaceProjectsHost(
           applyCover: z.boolean().optional().default(true),
           provider: z.string().optional(),
           model: z.string().optional(),
+          retryOf: z.string().optional(),
         }),
         run: async input => {
           await resolveAiRoute(readLlm(), readDefaultModel(), {
@@ -1129,16 +1282,28 @@ export function createWorkspaceProjectsHost(
             pausable: true,
             cancellable: true,
             title: `AI 批量提取 (${targets.length} 个项目)`,
+            retry: {
+              kind: 'projects-ai-batch',
+              params: {
+                applyCover: input.applyCover,
+                ...(input.provider ? { provider: input.provider } : {}),
+                ...(input.model ? { model: input.model } : {}),
+              },
+            },
+            ...(input.retryOf ? { retryOf: input.retryOf } : {}),
             meta: { total: targets.length, mode: 'ai-batch' },
             run: async helpers => {
               let succeeded = 0
               let failed = 0
               const progress = createProjectTaskProgress(helpers, targets)
+              helpers.items.define(
+                targets.map(target => ({ key: target.id, label: target.name })),
+              )
               for (let i = 0; i < targets.length; i += 1) {
-                helpers.throwIfAborted()
-                await helpers.waitIfPaused()
+                await helpers.items.checkpoint()
                 const target = targets[i]!
                 progress.setStatus(i, 'running')
+                helpers.items.begin(target.id)
                 progress.report(`AI 提取 (${i + 1}/${targets.length})：${target.name}`)
                 try {
                   await extractSingleProjectWithAi(target, {
@@ -1148,14 +1313,17 @@ export function createWorkspaceProjectsHost(
                     signal: helpers.signal,
                   })
                   succeeded += 1
+                  helpers.items.succeed(target.id)
                   progress.setStatus(i, 'completed')
                 } catch (err) {
                   if (helpers.signal.aborted) {
+                    helpers.items.cancel(target.id, '已取消')
                     progress.setStatus(i, 'cancelled')
                     progress.report(`已取消 AI 提取：${target.name}`)
                     throw err
                   }
                   failed += 1
+                  helpers.items.fail(target.id, err)
                   progress.setStatus(i, 'failed', err)
                 }
               }
@@ -1242,6 +1410,7 @@ export function createWorkspaceProjectsHost(
           libraryId: z.string().optional(),
           projectIds: z.array(z.string().min(1)).optional(),
           onlyChanged: z.boolean().optional().default(true),
+          retryOf: z.string().optional(),
         }),
         run: async input => {
           const idx = await indexStore.read()
@@ -1264,28 +1433,47 @@ export function createWorkspaceProjectsHost(
             pausable: true,
             cancellable: true,
             title: `批量增量更新 (${targets.length} 个项目)`,
+            retry: {
+              kind: 'projects-batch-sync',
+              params: { onlyChanged: input.onlyChanged },
+            },
+            ...(input.retryOf ? { retryOf: input.retryOf } : {}),
             meta: { total: targets.length, mode: 'batch-sync' },
             run: async helpers => {
               let synced = 0
+              let failed = 0
               const progress = createProjectTaskProgress(helpers, targets)
+              helpers.items.define(
+                targets.map(target => ({ key: target.id, label: target.name })),
+              )
               for (let i = 0; i < targets.length; i += 1) {
-                helpers.throwIfAborted()
-                await helpers.waitIfPaused()
+                await helpers.items.checkpoint()
                 const target = targets[i]!
                 progress.setStatus(i, 'running')
+                helpers.items.begin(target.id)
                 progress.report(`增量更新 (${i + 1}/${targets.length})：${target.name}`)
                 try {
                   await syncSingleProject(target, helpers.signal)
+                  helpers.items.succeed(target.id)
                 } catch (err) {
-                  progress.setStatus(i, helpers.signal.aborted ? 'cancelled' : 'failed', err)
-                  progress.report(`增量更新中止：${target.name}`)
-                  throw err
+                  if (helpers.signal.aborted) {
+                    helpers.items.cancel(target.id, '已取消')
+                    progress.setStatus(i, 'cancelled')
+                    progress.report(`增量更新中止：${target.name}`)
+                    throw err
+                  }
+                  failed += 1
+                  helpers.items.fail(target.id, err)
+                  progress.setStatus(i, 'failed', err)
+                  continue
                 }
                 progress.setStatus(i, 'completed')
                 synced += 1
               }
-              progress.report(`已完成 ${synced} 个项目的增量更新`)
-              return { synced }
+              progress.report(
+                `已完成 ${synced} 个项目的增量更新${failed > 0 ? `，失败 ${failed}` : ''}`,
+              )
+              return { synced, failed }
             },
           })
 
@@ -1407,6 +1595,7 @@ export function createWorkspaceProjectsHost(
       const warmRes = await thumbService.warmAllProjectThumbs(summary.path, summary.id, allFiles, {
         signal: warmOpts.signal,
         hideMetaDir: warmOpts.hideMetaDir,
+        projectName: summary.name,
         onProgress: warmOpts.onProgress,
       })
       const coverThumbFile = await ensureCoverThumbnail(
@@ -1440,6 +1629,7 @@ export function createWorkspaceProjectsHost(
       return thumbService.warmAllProjectThumbs(summary.path, summary.id, entries, {
         signal: warmOpts.signal,
         hideMetaDir: warmOpts.hideMetaDir,
+        projectName: summary.name,
         onProgress: warmOpts.onProgress,
       })
     },

@@ -15,6 +15,7 @@ export function ProjectsStatus(_props: FrameViewProps): React.ReactElement {
     recentFinishedTask,
     pauseTask,
     resumeTask,
+    stopTask,
     cancelTask,
     clearFinishedTasks,
   } = useProjects()
@@ -54,6 +55,7 @@ export function ProjectsStatus(_props: FrameViewProps): React.ReactElement {
         recentFinishedTask={recentFinishedTask}
         onPause={pauseTask}
         onResume={resumeTask}
+        onStop={stopTask}
         onCancel={cancelTask}
         onClearFinished={clearFinishedTasks}
         idleContent={idleContent}

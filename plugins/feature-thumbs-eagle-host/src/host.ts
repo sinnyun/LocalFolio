@@ -13,7 +13,6 @@ import {
   type FolioTasksService,
   type FolioThumbsService,
   type TaskSnapshot,
-  type ThumbStatusEntry,
 } from '@folio/base-contract'
 import {
   createEagleThumbClient,
@@ -146,7 +145,139 @@ export function registerFeatureThumbsEagleHost(
     },
   })
 
+  const enqueueEagleBatch = async (input: {
+    readonly filePaths: readonly string[]
+    readonly projectId?: string
+    readonly maxDim?: number
+    readonly retryOf?: string
+  }) => {
+    const filePaths = [...input.filePaths]
+    const { state, client } = await createClient()
+    const preInfo = await client.probeLibraryInfo()
+    if (!preInfo) {
+      throw new FolioError(
+        'eagle_offline',
+        '未检测到正在运行的 Eagle 服务，请先打开 Eagle 后再试',
+        503,
+      )
+    }
+    const project = input.projectId ? await projectsHost?.resolveProject(input.projectId) : null
+    const maxDim = input.maxDim ?? 360
+    const handle = tasks.enqueue({
+      scope: 'thumbs-eagle',
+      queue: 'thumbs-eagle-batch',
+      concurrency: 1,
+      title: `Eagle 补全缩略图（${filePaths.length} 个文件）`,
+      pausable: true,
+      cancellable: true,
+      retry: {
+        kind: 'thumbs-eagle',
+        params: {
+          ...(input.projectId ? { projectId: input.projectId } : {}),
+          maxDim,
+        },
+      },
+      ...(input.retryOf ? { retryOf: input.retryOf } : {}),
+      meta: {
+        projectId: input.projectId ?? null,
+        projectName: project?.name,
+        totalFiles: filePaths.length,
+      },
+      run: async helpers => {
+        helpers.items.define(
+          filePaths.map(filePath => ({ key: filePath, label: path.basename(filePath) })),
+        )
+        activeBatchCount += 1
+        const previousLibraryPath = preInfo.path
+        try {
+          helpers.reportProgress({
+            current: 0,
+            total: filePaths.length,
+            message: '正在准备 Eagle 专用缓存库...',
+          })
+          const results = await thumbs.generateManual({
+            providerId: 'eagle',
+            filePaths,
+            maxDim,
+            signal: helpers.signal,
+            onBeforeItem: () => helpers.items.checkpoint(),
+            onItem: (filePath, status, error) => {
+              if (status === 'READY') helpers.items.succeed(filePath)
+              else helpers.items.fail(filePath, error ?? 'Eagle 未生成缩略图')
+            },
+            onProgress: (current, total, fp) => {
+              helpers.reportProgress({
+                current,
+                total,
+                message: `Eagle 补全中：${path.basename(fp)}`,
+              })
+            },
+          })
+
+          // Mirror completed thumbnails into project .folio-meta if triggered from Project Library
+          if (input.projectId && projectsHost) {
+            const project = await projectsHost.resolveProject(input.projectId)
+            if (project) {
+              const readyRelPaths = results
+                .filter(r => r.status === 'READY')
+                .map(r => path.relative(project.path, r.filePath).replace(/\\/g, '/'))
+                .filter(rel => rel && !rel.startsWith('..') && !path.isAbsolute(rel))
+              if (readyRelPaths.length > 0) {
+                await projectsHost
+                  .warmProjectFileThumbs(input.projectId, readyRelPaths, {
+                    signal: helpers.signal,
+                  })
+                  .catch(() => {})
+              }
+            }
+          }
+
+          runtime.events.emitInvalidate('projects')
+          runtime.events.emitInvalidate('files')
+          const result = {
+            total: results.length,
+            ready: results.filter(r => r.status === 'READY').length,
+            failed: results.filter(r => r.status === 'FAILED_EAGLE').length,
+          }
+          helpers.reportProgress({
+            current: result.total,
+            total: filePaths.length,
+            message: 'Eagle 缩略图补全结束',
+            detail: { succeeded: result.ready, failed: result.failed },
+          })
+          return result
+        } finally {
+          activeBatchCount = Math.max(0, activeBatchCount - 1)
+          if (
+            previousLibraryPath &&
+            path.resolve(previousLibraryPath).toLowerCase() !==
+              path.resolve(state.cacheLibraryPath).toLowerCase()
+          ) {
+            await client.switchLibrary(previousLibraryPath).catch(() => false)
+          }
+        }
+      },
+    })
+    return handle
+  }
+
   const disposers = [
+    tasks.registerRetryHandler({
+      kind: 'thumbs-eagle',
+      retry: async ({ task, items }) => {
+        const params = task.retry?.params ?? {}
+        const projectId = typeof params.projectId === 'string' ? params.projectId : undefined
+        const maxDim = typeof params.maxDim === 'number' ? params.maxDim : undefined
+        const handle = await enqueueEagleBatch({
+          filePaths: items.map(item => item.key),
+          ...(projectId ? { projectId } : {}),
+          ...(maxDim ? { maxDim } : {}),
+          retryOf: task.id,
+        })
+        return handle.snapshot()
+      },
+    }),
+
     disposeProvider,
 
     runtime.registerAction(
@@ -341,98 +472,11 @@ export function registerFeatureThumbsEagleHost(
           maxDim: z.number().int().positive().max(1024).optional(),
         }),
         run: async (input): Promise<{ readonly task: TaskSnapshot }> => {
-          const { state, client } = await createClient()
-          const preInfo = await client.probeLibraryInfo()
-          if (!preInfo) {
-            throw new FolioError(
-              'eagle_offline',
-              '未检测到正在运行的 Eagle 服务，请先打开 Eagle 后再试',
-              503,
-            )
-          }
-
-          const project = input.projectId ? await projectsHost?.resolveProject(input.projectId) : null
-          const handle = tasks.enqueue({
-            scope: 'thumbs-eagle',
-            queue: 'thumbs-eagle-batch',
-            concurrency: 1,
-            title: `Eagle 补全缩略图（${input.filePaths.length} 个文件）`,
-            pausable: false,
-            cancellable: true,
-            meta: {
-              projectId: input.projectId ?? null,
-              projectName: project?.name,
-              totalFiles: input.filePaths.length,
-            },
-            run: async helpers => {
-              activeBatchCount += 1
-              const previousLibraryPath = preInfo.path
-              let results: readonly ThumbStatusEntry[] = []
-              try {
-                helpers.reportProgress({
-                  current: 0,
-                  total: input.filePaths.length,
-                  message: '正在准备 Eagle 专用缓存库...',
-                })
-                results = await thumbs.generateManual({
-                  providerId: 'eagle',
-                  filePaths: input.filePaths,
-                  maxDim: input.maxDim ?? 360,
-                  signal: helpers.signal,
-                  onProgress: (current, total, fp) => {
-                    helpers.reportProgress({
-                      current,
-                      total,
-                      message: `Eagle 补全中：${path.basename(fp)}`,
-                    })
-                  },
-                })
-
-                // Mirror completed thumbnails into project .folio-meta if triggered from Project Library
-                if (input.projectId && projectsHost) {
-                  const project = await projectsHost.resolveProject(input.projectId)
-                  if (project) {
-                    const readyRelPaths = results
-                      .filter(r => r.status === 'READY')
-                      .map(r => path.relative(project.path, r.filePath).replace(/\\/g, '/'))
-                      .filter(rel => rel && !rel.startsWith('..') && !path.isAbsolute(rel))
-                    if (readyRelPaths.length > 0) {
-                      await projectsHost
-                        .warmProjectFileThumbs(input.projectId, readyRelPaths, {
-                          signal: helpers.signal,
-                        })
-                        .catch(() => {})
-                    }
-                  }
-                }
-
-                runtime.events.emitInvalidate('projects')
-                runtime.events.emitInvalidate('files')
-                const result = {
-                  total: results.length,
-                  ready: results.filter(r => r.status === 'READY').length,
-                  failed: results.filter(r => r.status === 'FAILED_EAGLE').length,
-                }
-                helpers.reportProgress({
-                  current: result.total,
-                  total: input.filePaths.length,
-                  message: 'Eagle 缩略图补全结束',
-                  detail: { succeeded: result.ready, failed: result.failed },
-                })
-                return result
-              } finally {
-                activeBatchCount = Math.max(0, activeBatchCount - 1)
-                if (
-                  previousLibraryPath &&
-                  path.resolve(previousLibraryPath).toLowerCase() !==
-                    path.resolve(state.cacheLibraryPath).toLowerCase()
-                ) {
-                  await client.switchLibrary(previousLibraryPath).catch(() => false)
-                }
-              }
-            },
+          const handle = await enqueueEagleBatch({
+            filePaths: input.filePaths,
+            ...(input.projectId ? { projectId: input.projectId } : {}),
+            ...(input.maxDim ? { maxDim: input.maxDim } : {}),
           })
-
           return { task: handle.snapshot() }
         },
       }),

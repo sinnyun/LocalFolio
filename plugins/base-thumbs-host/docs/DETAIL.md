@@ -9,6 +9,7 @@ Standalone base capability plugin providing `ctx.folioThumbs` (`FolioThumbsServi
   - `thumbs-fast` (concurrency 4): embedded PSD/PSB JPEG, SVG, WIC, and Windows Shell.
   - `thumbs-heavy` (concurrency 2): Windows Shell for large design files, L2 ImageMagick 7 & FFmpeg.
   - `thumbs-eagle` (concurrency 1): Strictly serial L3 manual-only providers.
+- **Itemised batches**: `generateAutoBatch` / `generateManual` accept `onBeforeItem` and `onItem` callbacks so producers can report one ledger entry per file, pause/stop at item boundaries, and hand failed paths back through their own retry handler. `thumbs.auto.batch` registers the `thumbs-auto` retry kind.
 - **Large design files**: PSD and PSB first try their embedded JPEG with bounded random-access reads. Files over 200 MiB with extensions `.psd/.psb/.tif/.tiff` skip WIC and use Windows Shell in the heavy queue before falling back to ImageMagick. Automatic misses are retried on a later request after five minutes. Cancelled requests do not record a miss.
 - **Hard `manualOnly` Isolation**: Automatic generation (`generate` / `generateAutoBatch`) never invokes `manualOnly: true` providers (such as L3 Eagle).
 

@@ -350,7 +350,125 @@ export function registerFeatureArchiveHost(
       (task.status === 'queued' || task.status === 'running' || task.status === 'paused'),
     )
 
+  const enqueueArchiveThumbs = async (input: {
+    readonly projectId: string
+    readonly relPaths?: readonly string[]
+    readonly retryOf?: string
+  }) => {
+    const projectsHost = requireProjectsHost()
+    const project = await projectsHost.resolveProject(input.projectId)
+    const snapshot = await projectsHost.readProjectSnapshot(input.projectId)
+    if (!project || !snapshot) throw new FolioError('project_not_found', '项目不存在', 404)
+    if (snapshot.archive?.mode !== 'archived') {
+      throw new FolioError('not_archived', '当前项目尚未归档', 400)
+    }
+    const filesByPath = new Map(snapshot.files.map(file => [file.relPath, file]))
+    const requested = input.relPaths
+      ? [...new Set(input.relPaths)]
+      : snapshot.files.filter(file => file.thumbSupported).map(file => file.relPath)
+    const selected = requested.map(relPath => {
+      const file = filesByPath.get(relPath)
+      if (!file?.thumbSupported) {
+        throw new FolioError('invalid_thumb_target', `文件不在归档清单中或不支持缩略图: ${relPath}`, 400)
+      }
+      return file
+    })
+    const handle = tasks.enqueue({
+      scope: 'projects',
+      queue: 'archive-ops',
+      concurrency: 1,
+      pausable: true,
+      cancellable: true,
+      title: `归档内补缩略图：${project.name}`,
+      retry: { kind: 'archive-thumbs', params: { projectId: project.id } },
+      ...(input.retryOf ? { retryOf: input.retryOf } : {}),
+      meta: { projectId: project.id, projectName: project.name, mode: 'archive-thumbs' },
+      run: async helpers => {
+        const current = await projectsHost.readProjectSnapshot(project.id)
+        if (
+          current?.archive?.mode !== 'archived' ||
+          current.archive.versions !== snapshot.archive?.versions ||
+          current.archive.archiveFileName !== snapshot.archive?.archiveFileName
+        ) {
+          throw new FolioError('archive_changed', '归档已变更，请刷新项目后重试', 409)
+        }
+        const archiveFileName = current.archive.archiveFileName
+        const currentByPath = new Map(current.files.map(file => [file.relPath, file.thumbKey]))
+        const { hideMetaDir } = await toolManager.getSettings()
+        helpers.items.define(
+          selected.map(file => ({ key: file.relPath, label: file.name })),
+        )
+        let succeeded = 0
+        let failed = 0
+        let lastError: string | null = null
+        const report = (message: string): void => {
+          helpers.reportProgress({
+            current: succeeded + failed,
+            total: selected.length,
+            message,
+            detail: { succeeded, failed, lastError },
+          })
+        }
+
+        for (const file of selected) {
+          await helpers.items.checkpoint()
+          report(`正在补图：${file.relPath}`)
+          helpers.items.begin(file.relPath)
+          try {
+            if (currentByPath.get(file.relPath) !== file.thumbKey) {
+              throw new Error('归档文件记录已变更')
+            }
+            const ready = await projectsHost.cacheProjectFileThumb(project.id, file, () =>
+              archiveService.extractTemporaryThumbSource({
+                projectPath: project.path,
+                archiveFileName,
+                relPath: file.relPath,
+                signal: helpers.signal,
+              }), { signal: helpers.signal, hideMetaDir })
+            if (!ready) throw new Error('本机取图链路未生成缩略图')
+            helpers.items.succeed(file.relPath)
+            succeeded += 1
+          } catch (err) {
+            helpers.throwIfAborted()
+            const message = err instanceof Error ? err.message : String(err)
+            helpers.items.fail(file.relPath, message)
+            failed += 1
+            lastError = `${file.relPath}：${message}`
+          }
+          report(`已处理 ${succeeded + failed}/${selected.length} 个文件`)
+        }
+        if (succeeded === 0 && lastError) {
+          throw new FolioError('archive_thumbs_failed', lastError, 422)
+        }
+        return { succeeded, failed }
+      },
+    })
+    return handle
+  }
+
   const disposers = [
+    tasks.registerRetryHandler({
+      kind: 'archive-thumbs',
+      retry: ({ task, items, wholeTask }) => {
+        const projectId =
+          typeof task.retry?.params?.projectId === 'string'
+            ? task.retry.params.projectId
+            : typeof task.meta?.projectId === 'string'
+              ? task.meta.projectId
+              : ''
+        if (!projectId) {
+          throw new FolioError('task_retry_invalid', '归档补图任务缺少项目标识', 400)
+        }
+        return enqueueArchiveThumbs({
+          projectId,
+          ...(!wholeTask && items.length > 0
+            ? { relPaths: items.map(item => item.key) }
+            : {}),
+          retryOf: task.id,
+        }).then(handle => handle.snapshot())
+      },
+    }),
+
     runtime.registerAction(
       defineAction({
         id: 'archive.tool.status',
@@ -548,76 +666,9 @@ export function registerFeatureArchiveHost(
           relPaths: z.array(z.string().min(1)).min(1),
         }),
         run: async input => {
-          const projectsHost = requireProjectsHost()
-          const project = await projectsHost.resolveProject(input.projectId)
-          const snapshot = await projectsHost.readProjectSnapshot(input.projectId)
-          if (!project || !snapshot) throw new FolioError('project_not_found', '项目不存在', 404)
-          if (snapshot.archive?.mode !== 'archived') {
-            throw new FolioError('not_archived', '当前项目尚未归档', 400)
-          }
-          const filesByPath = new Map(snapshot.files.map(file => [file.relPath, file]))
-          const selected = [...new Set(input.relPaths)].map(relPath => {
-            const file = filesByPath.get(relPath)
-            if (!file?.thumbSupported) {
-              throw new FolioError('invalid_thumb_target', `文件不在归档清单中或不支持缩略图: ${relPath}`, 400)
-            }
-            return file
-          })
-          const handle = tasks.enqueue({
-            scope: 'projects',
-            queue: 'archive-ops',
-            concurrency: 1,
-            pausable: false,
-            cancellable: true,
-            title: `归档内补缩略图：${project.name}`,
-            meta: { projectId: project.id, projectName: project.name, mode: 'archive-thumbs' },
-            run: async helpers => {
-              const current = await projectsHost.readProjectSnapshot(project.id)
-              if (current?.archive?.mode !== 'archived' || current.archive.versions !== snapshot.archive?.versions ||
-                  current.archive.archiveFileName !== snapshot.archive?.archiveFileName) {
-                throw new FolioError('archive_changed', '归档已变更，请刷新项目后重试', 409)
-              }
-              const archiveFileName = current.archive.archiveFileName
-              const currentByPath = new Map(current.files.map(file => [file.relPath, file.thumbKey]))
-              const { hideMetaDir } = await toolManager.getSettings()
-              let succeeded = 0
-              let failed = 0
-              let lastError: string | null = null
-              const report = (message: string) => helpers.reportProgress({
-                current: succeeded + failed,
-                total: selected.length,
-                message,
-                detail: { succeeded, failed, lastError },
-              })
-
-              for (const file of selected) {
-                helpers.throwIfAborted()
-                report(`正在补图：${file.relPath}`)
-                try {
-                  if (currentByPath.get(file.relPath) !== file.thumbKey) {
-                    throw new Error('归档文件记录已变更')
-                  }
-                  const ready = await projectsHost.cacheProjectFileThumb(project.id, file, () =>
-                    archiveService.extractTemporaryThumbSource({
-                      projectPath: project.path,
-                      archiveFileName,
-                      relPath: file.relPath,
-                      signal: helpers.signal,
-                    }), { signal: helpers.signal, hideMetaDir })
-                  if (!ready) throw new Error('本机取图链路未生成缩略图')
-                  succeeded += 1
-                } catch (err) {
-                  helpers.throwIfAborted()
-                  failed += 1
-                  lastError = `${file.relPath}：${err instanceof Error ? err.message : String(err)}`
-                }
-                report(`已处理 ${succeeded + failed}/${selected.length} 个文件`)
-              }
-              if (succeeded === 0 && lastError) {
-                throw new FolioError('archive_thumbs_failed', lastError, 422)
-              }
-              return { succeeded, failed }
-            },
+          const handle = await enqueueArchiveThumbs({
+            projectId: input.projectId,
+            relPaths: input.relPaths,
           })
           return { task: handle.snapshot() }
         },

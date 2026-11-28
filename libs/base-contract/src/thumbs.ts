@@ -111,6 +111,12 @@ export interface FolioThumbsService {
       readonly preferPng?: boolean
       readonly force?: boolean
       readonly signal?: AbortSignal
+      readonly onBeforeItem?: (filePath: string) => Promise<void>
+      readonly onItem?: (
+        filePath: string,
+        status: 'READY' | 'MISSING' | 'IGNORED',
+        error?: string,
+      ) => void
       readonly onProgress?: (current: number, total: number, filePath: string) => void
     },
   ): Promise<ThumbAutoBatchResult>
@@ -121,6 +127,12 @@ export interface FolioThumbsService {
     readonly maxDim?: number
     readonly preferPng?: boolean
     readonly signal?: AbortSignal
+    readonly onBeforeItem?: (filePath: string) => Promise<void>
+    readonly onItem?: (
+      filePath: string,
+      status: 'READY' | 'FAILED',
+      error?: string,
+    ) => void
     readonly onProgress?: (current: number, total: number, filePath: string) => void
   }): Promise<readonly ThumbStatusEntry[]>
   getCacheStats(): Promise<ThumbCacheStats>

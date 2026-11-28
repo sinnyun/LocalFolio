@@ -409,6 +409,8 @@ export function createFolioThumbsService(
       readonly preferPng?: boolean
       readonly force?: boolean
       readonly signal?: AbortSignal
+      readonly onBeforeItem?: (filePath: string) => Promise<void>
+      readonly onItem?: (filePath: string, status: 'READY' | 'MISSING' | 'IGNORED', error?: string) => void
       readonly onProgress?: (current: number, total: number, filePath: string) => void
     } = {},
   ): Promise<ThumbAutoBatchResult> => {
@@ -421,19 +423,37 @@ export function createFolioThumbsService(
     await Promise.all(
       filePaths.map(async fp => {
         if (opts.signal?.aborted) return
-        const { record } = await generateWithRecord({
-          filePath: fp,
-          maxDim: opts.maxDim,
-          preferPng: opts.preferPng,
-          force: opts.force,
-          signal: opts.signal,
-        })
-        const entry = toThumbStatusEntry(record, resolveAbsCachePath)
-        if (record.status === 'READY') ready.push(entry)
-        else if (record.status === 'IGNORED') ignored.push(entry)
-        else missing.push(entry)
-        done += 1
-        opts.onProgress?.(done, total, fp)
+        await opts.onBeforeItem?.(fp)
+        if (opts.signal?.aborted) return
+        try {
+          const { record } = await generateWithRecord({
+            filePath: fp,
+            maxDim: opts.maxDim,
+            preferPng: opts.preferPng,
+            force: opts.force,
+            signal: opts.signal,
+          })
+          const entry = toThumbStatusEntry(record, resolveAbsCachePath)
+          if (record.status === 'READY') {
+            ready.push(entry)
+            opts.onItem?.(fp, 'READY')
+          } else if (record.status === 'IGNORED') {
+            ignored.push(entry)
+            opts.onItem?.(fp, 'IGNORED')
+          } else {
+            missing.push(entry)
+            opts.onItem?.(fp, 'MISSING', '未生成缩略图')
+          }
+        } catch (err) {
+          if (opts.signal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
+            throw err
+          }
+          opts.onItem?.(fp, 'MISSING', err instanceof Error ? err.message : String(err))
+          throw err
+        } finally {
+          done += 1
+          opts.onProgress?.(done, total, fp)
+        }
       }),
     )
 
@@ -505,6 +525,12 @@ export function createFolioThumbsService(
     readonly maxDim?: number
     readonly preferPng?: boolean
     readonly signal?: AbortSignal
+    readonly onBeforeItem?: (filePath: string) => Promise<void>
+    readonly onItem?: (
+      filePath: string,
+      status: 'READY' | 'FAILED',
+      error?: string,
+    ) => void
     readonly onProgress?: (current: number, total: number, filePath: string) => void
   }): Promise<readonly ThumbStatusEntry[]> => {
     const provider = providers.get(opts.providerId)
@@ -522,6 +548,8 @@ export function createFolioThumbsService(
     for (let i = 0; i < total; i += 1) {
       if (opts.signal?.aborted) break
       const filePath = path.resolve(opts.filePaths[i]!)
+      await opts.onBeforeItem?.(filePath)
+      if (opts.signal?.aborted) break
       const canonicalKey = canonicalThumbPathKey(filePath)
       const ext = path.extname(filePath).toLowerCase()
       const stat = await statSourceFile(filePath)
@@ -544,6 +572,7 @@ export function createFolioThumbsService(
         }
         await indexStore.upsert(failedRec)
         results.push(toThumbStatusEntry(failedRec, resolveAbsCachePath))
+        opts.onItem?.(filePath, 'FAILED', '文件不存在或不可读取')
         opts.onProgress?.(i + 1, total, filePath)
         continue
       }
@@ -559,6 +588,7 @@ export function createFolioThumbsService(
       }
 
       const res = await runProviderInLane(provider, req)
+      if (opts.signal?.aborted) break
       if (res && res.buffer.length > 0) {
         const cacheRel = await indexStore.writeCacheFile({
           filePath,
@@ -581,6 +611,7 @@ export function createFolioThumbsService(
         }
         await indexStore.upsert(readyRec)
         results.push(toThumbStatusEntry(readyRec, resolveAbsCachePath))
+        opts.onItem?.(filePath, 'READY')
       } else {
         const failedRec: ThumbIndexRecord = {
           filePath,
@@ -596,6 +627,7 @@ export function createFolioThumbsService(
         }
         await indexStore.upsert(failedRec)
         results.push(toThumbStatusEntry(failedRec, resolveAbsCachePath))
+        opts.onItem?.(filePath, 'FAILED', '未生成缩略图')
       }
 
       opts.onProgress?.(i + 1, total, filePath)
@@ -647,7 +679,68 @@ export function registerBaseThumbsHost(options: RegisterBaseThumbsHostOptions): 
     concurrency: options.concurrency,
   })
 
+  const enqueueAutoBatch = (input: {
+    readonly filePaths: readonly string[]
+    readonly maxDim?: number
+    readonly force?: boolean
+  }) => {
+    const filePaths = [...input.filePaths]
+    return options.tasks.enqueue({
+      scope: 'thumbs',
+      title: `批量生成缩略图（${filePaths.length} 个文件）`,
+      queue: 'thumbs-auto-batch',
+      concurrency: 1,
+      pausable: true,
+      retry: {
+        kind: 'thumbs-auto',
+        ...(input.maxDim ? { params: { maxDim: input.maxDim } } : {}),
+      },
+      run: async helpers => {
+        helpers.items.define(
+          filePaths.map(filePath => ({ key: filePath, label: path.basename(filePath) })),
+        )
+        const result = await service.generateAutoBatch(filePaths, {
+          maxDim: input.maxDim,
+          force: input.force,
+          signal: helpers.signal,
+          onBeforeItem: () => helpers.items.checkpoint(),
+          onItem: (filePath, status, error) => {
+            if (status === 'READY') helpers.items.succeed(filePath)
+            else if (status === 'IGNORED') helpers.items.skip(filePath, '已忽略的格式')
+            else helpers.items.fail(filePath, error ?? '未生成缩略图')
+          },
+          onProgress: (current, total, filePath) => {
+            helpers.reportProgress({ current, total, message: path.basename(filePath) })
+          },
+        })
+        helpers.reportProgress({
+          current: filePaths.length,
+          total: filePaths.length,
+          detail: {
+            succeeded: result.ready.length,
+            failed: result.missing.length,
+            ignored: result.ignored.length,
+          },
+        })
+        return result
+      },
+    })
+  }
+
   const disposers = [
+    options.tasks.registerRetryHandler({
+      kind: 'thumbs-auto',
+      retry: ({ task, items }) => {
+        const maxDim =
+          typeof task.retry?.params?.maxDim === 'number' ? task.retry.params.maxDim : undefined
+        return enqueueAutoBatch({
+          filePaths: items.map(item => item.key),
+          ...(maxDim ? { maxDim } : {}),
+          force: true,
+        }).snapshot()
+      },
+    }),
+
     options.runtime.registerAction(
       defineAction({
         id: 'thumbs.providers.list',
@@ -686,29 +779,12 @@ export function registerBaseThumbsHost(options: RegisterBaseThumbsHostOptions): 
           maxDim: z.number().int().positive().max(1024).optional(),
           force: z.boolean().optional(),
         }),
-        run: async input => options.tasks.enqueue({
-          scope: 'thumbs',
-          title: `批量生成缩略图（${input.filePaths.length} 个文件）`,
-          queue: 'thumbs-auto-batch',
-          concurrency: 1,
-          pausable: false,
-          run: async helpers => {
-            const result = await service.generateAutoBatch(input.filePaths, {
-              maxDim: input.maxDim,
-              force: input.force,
-              signal: helpers.signal,
-              onProgress: (current, total, filePath) => {
-                helpers.reportProgress({ current, total, message: path.basename(filePath) })
-              },
-            })
-            helpers.reportProgress({
-              current: input.filePaths.length,
-              total: input.filePaths.length,
-              detail: { succeeded: result.ready.length, failed: result.missing.length, ignored: result.ignored.length },
-            })
-            return result
-          },
-        }).done,
+        run: async input =>
+          enqueueAutoBatch({
+            filePaths: input.filePaths,
+            ...(input.maxDim !== undefined ? { maxDim: input.maxDim } : {}),
+            ...(input.force !== undefined ? { force: input.force } : {}),
+          }).done,
       }),
     ),
 

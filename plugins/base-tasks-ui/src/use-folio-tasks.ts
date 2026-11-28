@@ -1,10 +1,24 @@
 import * as React from 'react'
-import type { RuntimeTopicEvent, TaskSnapshot, TaskStatus } from '@folio/base-contract'
+import type {
+  RuntimeTopicEvent,
+  TaskItemPage,
+  TaskItemStatus,
+  TaskRetryResult,
+  TaskSnapshot,
+  TaskStatus,
+} from '@folio/base-contract'
 import { rpcCall } from '@folio/base-contract/rpc'
 
 const TOPIC_EVENT_NAME = 'folio:topic'
 const ACTIVE_STATUSES = new Set<TaskStatus>(['queued', 'running', 'paused'])
-const TERMINAL_STATUSES = new Set<TaskStatus>(['completed', 'failed', 'cancelled'])
+const TERMINAL_STATUSES = new Set<TaskStatus>([
+  'completed',
+  'failed',
+  'cancelled',
+  'stopped',
+  'interrupted',
+])
+const CLEARABLE_STATUSES = new Set<TaskStatus>(['completed', 'failed', 'cancelled'])
 
 function sortTasksDesc(list: readonly TaskSnapshot[]): TaskSnapshot[] {
   return [...list].sort((a, b) => {
@@ -61,8 +75,90 @@ export interface UseFolioTasksResult {
   trackTask(snapshot: TaskSnapshot): void
   pauseTask(taskId: string): Promise<void>
   resumeTask(taskId: string): Promise<void>
+  stopTask(taskId: string): Promise<void>
   cancelTask(taskId: string): Promise<void>
+  retryTaskItems(taskId: string, itemKeys?: readonly string[]): Promise<TaskRetryResult>
   clearFinishedTasks(scope?: string): Promise<void>
+}
+
+export interface TaskItemsQueryOptions {
+  readonly status?: TaskItemStatus | 'unfinished' | 'all'
+  readonly offset?: number
+  readonly limit?: number
+}
+
+/** Fetch one page of task items. Exposed for panels that page or lazy-load. */
+export async function fetchTaskItems(
+  taskId: string,
+  query: TaskItemsQueryOptions = {},
+): Promise<TaskItemPage> {
+  return rpcCall<TaskItemPage>('tasks.items', {
+    id: taskId,
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.offset !== undefined ? { offset: query.offset } : {}),
+    ...(query.limit !== undefined ? { limit: query.limit } : {}),
+  })
+}
+
+export interface UseTaskItemsOptions {
+  readonly taskId: string | null | undefined
+  readonly status?: TaskItemStatus | 'unfinished' | 'all'
+  readonly limit?: number
+  readonly enabled?: boolean
+  /** Re-fetch whenever this changes; pass a compact item-progress signature. */
+  readonly refreshKey?: number | string
+  /** Also poll while the task is still active. */
+  readonly live?: boolean
+  readonly pollMs?: number
+}
+
+export interface UseTaskItemsResult {
+  readonly page: TaskItemPage | null
+  readonly loading: boolean
+  readonly error: string | null
+  reload(): Promise<void>
+}
+
+/** Loads (and optionally polls) the item list of exactly one task. */
+export function useTaskItems(options: UseTaskItemsOptions): UseTaskItemsResult {
+  const { taskId, status = 'all', limit = 200, enabled = true, refreshKey, live = false } = options
+  const pollMs = Math.max(500, options.pollMs ?? 2000)
+  const [page, setPage] = React.useState<TaskItemPage | null>(null)
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const requestSeq = React.useRef(0)
+
+  const reload = React.useCallback(async () => {
+    if (!enabled || !taskId) {
+      setPage(null)
+      return
+    }
+    const seq = ++requestSeq.current
+    setLoading(true)
+    try {
+      const next = await fetchTaskItems(taskId, { status, limit })
+      if (seq !== requestSeq.current) return
+      setPage(next)
+      setError(null)
+    } catch (err) {
+      if (seq !== requestSeq.current) return
+      setError(err instanceof Error ? err.message : '无法获取子项明细')
+    } finally {
+      if (seq === requestSeq.current) setLoading(false)
+    }
+  }, [enabled, taskId, status, limit])
+
+  React.useEffect(() => {
+    void reload()
+  }, [reload, refreshKey])
+
+  React.useEffect(() => {
+    if (!enabled || !taskId || !live) return undefined
+    const timer = setInterval(() => void reload(), pollMs)
+    return () => clearInterval(timer)
+  }, [enabled, taskId, live, pollMs, reload])
+
+  return { page, loading, error, reload }
 }
 
 export function useFolioTasks(options: UseFolioTasksOptions): UseFolioTasksResult {
@@ -163,12 +259,12 @@ export function useFolioTasks(options: UseFolioTasksOptions): UseFolioTasksResul
         const clearedScope = payload?.scope
         if (!clearedScope) return
         if (clearedScope === '*' || clearedScope === 'all') {
-          setTasks(prev => prev.filter(t => !TERMINAL_STATUSES.has(t.status)))
+          setTasks(prev => prev.filter(t => !CLEARABLE_STATUSES.has(t.status)))
           return
         }
         if (allScopes || scopeSet.has(clearedScope)) {
           setTasks(prev =>
-            prev.filter(t => !(t.scope === clearedScope && TERMINAL_STATUSES.has(t.status))),
+            prev.filter(t => !(t.scope === clearedScope && CLEARABLE_STATUSES.has(t.status))),
           )
         }
         return
@@ -220,15 +316,33 @@ export function useFolioTasks(options: UseFolioTasksOptions): UseFolioTasksResul
     setTasks(prev => upsertTask(prev, snap))
   }, [])
 
+  const stopTask = React.useCallback(async (taskId: string) => {
+    const snap = await rpcCall<TaskSnapshot>('tasks.stop', { id: taskId })
+    setTasks(prev => upsertTask(prev, snap))
+  }, [])
+
   const cancelTask = React.useCallback(async (taskId: string) => {
     const snap = await rpcCall<TaskSnapshot>('tasks.cancel', { id: taskId })
     setTasks(prev => upsertTask(prev, snap))
   }, [])
 
+  const retryTaskItems = React.useCallback(
+    async (taskId: string, itemKeys?: readonly string[]) => {
+      const result = await rpcCall<TaskRetryResult>('tasks.retry', {
+        id: taskId,
+        ...(itemKeys && itemKeys.length > 0 ? { itemKeys: [...itemKeys] } : {}),
+      })
+      if (result.task) setTasks(prev => upsertTask(prev, result.task!))
+      if (result.source) setTasks(prev => upsertTask(prev, result.source!))
+      return result
+    },
+    [],
+  )
+
   const clearFinishedTasks = React.useCallback(async (scope?: string) => {
     if (!scope && allScopes) {
       await rpcCall('tasks.clear', {})
-      setTasks(prev => prev.filter(task => !TERMINAL_STATUSES.has(task.status)))
+      setTasks(prev => prev.filter(task => !CLEARABLE_STATUSES.has(task.status)))
       return
     }
     const targetScopes = scope ? [scope] : normalizedScopesRef.current
@@ -236,7 +350,7 @@ export function useFolioTasks(options: UseFolioTasksOptions): UseFolioTasksResul
     await Promise.all(targetScopes.map(s => rpcCall('tasks.clear', { scope: s })))
     const clearedSet = new Set(targetScopes)
     setTasks(prev =>
-      prev.filter(t => !(TERMINAL_STATUSES.has(t.status) && clearedSet.has(t.scope))),
+      prev.filter(t => !(CLEARABLE_STATUSES.has(t.status) && clearedSet.has(t.scope))),
     )
   }, [allScopes])
 
@@ -249,7 +363,9 @@ export function useFolioTasks(options: UseFolioTasksOptions): UseFolioTasksResul
     trackTask,
     pauseTask,
     resumeTask,
+    stopTask,
     cancelTask,
+    retryTaskItems,
     clearFinishedTasks,
   }
 }

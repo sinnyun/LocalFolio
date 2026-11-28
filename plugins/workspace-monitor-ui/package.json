@@ -25,7 +25,7 @@
       "external": ["@folio/base-ui-kit", "@folio/base-tasks-ui"]
     }
   },
-  "files": ["lib", "locale", "icon.svg"],
+  "files": ["lib", "locale", "icon.svg", "docs"],
   "peerDependencies": { "@deepseek-ai/cordis": "^4.0.0", "react": ">=18" },
   "devDependencies": {
     "@folio/base-contract": "workspace:*",

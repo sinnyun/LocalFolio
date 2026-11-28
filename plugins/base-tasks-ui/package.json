@@ -3,7 +3,7 @@
   "version": "0.3.0-alpha.0",
   "private": true,
   "type": "module",
-  "description": "LocalFolio shared background tasks client plugin: multi-scope SSE task subscription hook (useFolioTasks) and unified bottom status bar progress control (<TaskStatusBar>).",
+  "description": "LocalFolio shared background tasks client plugin: multi-scope SSE task subscription (useFolioTasks), item-detail subscription (useTaskItems), and unified bottom status bar progress control (<TaskStatusBar>).",
   "main": "./lib/index.js",
   "exports": {
     ".": "./lib/index.js",

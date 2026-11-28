@@ -91,6 +91,7 @@ export interface ProjectThumbService {
     options?: {
       readonly signal?: AbortSignal
       readonly hideMetaDir?: boolean
+      readonly projectName?: string
       readonly onProgress?: (done: number, total: number, currentRelPath: string, failed: number) => void
     },
   ): Promise<{ readonly total: number; readonly warmed: number; readonly failed: number }>
@@ -187,6 +188,10 @@ export function createProjectThumbService(options: {
               title: `项目缩略图：${opts.projectName}`,
               item: relPath,
               meta: { projectId, projectName: opts.projectName },
+              retry: {
+                kind: 'projects-thumbs',
+                params: { projectId, projectName: opts.projectName },
+              },
             },
           } : {}),
         })
@@ -329,6 +334,7 @@ export function createProjectThumbService(options: {
             const res = await ensureThumb(projectPath, projectId, file.relPath, file.thumbKey, {
               signal: opts.signal,
               hideMetaDir: opts.hideMetaDir,
+              projectName: opts.projectName,
             })
             if (res) warmed += 1
             else if (!opts.signal?.aborted) failed += 1

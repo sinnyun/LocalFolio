@@ -64,7 +64,7 @@
 | **画板** | 形态 A（四区） | tldraw 无限画布；图片只存本地文件链接，分层 LOD 代理渲染（256/512/1024/2048），浏览器拖入图片自动导入托管目录，断链检测与批量重定位（[DETAIL](plugins/workspace-canvas-ui/docs/DETAIL.md)） |
 | **物料** | 形态 A（四区） | 关联 A3 横版 `.vectorcraft` 文件；页面多选导出单图/多页 PDF；幻灯片式拖拽排序；物料信息头与 VectorCraft 前台双向同步；默认/项目两套物料数据表（[DETAIL](plugins/workspace-materials-ui/docs/DETAIL.md)） |
 | **项目库** | 形态 A（四区） | 多归档根目录管理、Worker 线程非阻塞扫描、`.folio-meta` 就地元数据与按需双尺寸缩略图缓存、`size+mtimeMs` 增量变更检测、DSH `ctx.llm` 目录采样与 AI 标签/摘要提取、多选批量管理、项目卡片总览（全部库/单库切换）→ 项目文件分组卡片网格的两级浏览与左侧栏随层级切换；项目内文件区与文件浏览器共用统一集合视图（筛选/分组/排序 + 四视图）（[DETAIL](plugins/workspace-projects-ui/docs/DETAIL.md)） |
-| **任务监控** | 形态 A（中心视图）与跨工作区浮窗 | 按工作区、项目与状态查看当前运行实例的后台任务、子项进度和失败详情。标题栏入口使用可拖动、可缩放悬浮面板。 |
+| **任务监控** | 形态 A（中心视图）与跨工作区浮窗 | 按工作区、项目与状态查看后台任务、子项进度和失败详情；任务账本持久化，重启后保留历史与中断任务；支持暂停 / 停止 / 继续 / 取消，失败缩略图等子项可单选或批量重试。标题栏入口使用可拖动、可缩放悬浮面板（[DETAIL](plugins/workspace-monitor-ui/docs/DETAIL.md)）。 |
 
 ### 内部扩展
 
@@ -100,13 +100,13 @@ LocalFolio/
 │   │  ── 基础能力 ──
 │   ├── base-storage-host/          @folio/base-storage-host   基础存储：ctx.folioStorage（按插件隔离目录 + JSON Store）
 │   ├── base-runtime-host/          @folio/base-runtime-host   基础运行时：ctx.folioRuntime（/lf/* RPC + SSE、动作表、清单）
-│   ├── base-tasks-host/            @folio/base-tasks-host     基础后台任务：ctx.folioTasks（有界并发队列、Worker 线程、SSE 进度）
+│   ├── base-tasks-host/            @folio/base-tasks-host     基础后台任务：ctx.folioTasks（有界并发队列、Worker 线程、暂停/停止/继续、子项重试、持久化账本、SSE 进度）
 │   ├── base-native-host/           @folio/base-native-host    基础桌面能力：ctx.folioNative（共享 Shell/WIC 缩略图池、原生弹窗/打开）
 │   ├── base-fs-host/               @folio/base-fs-host        基础文件系统：ctx.folioFs（路径规范化、分类、驱动器/目录枚举、Range 媒体流、缓存清理、原子写）
 │   ├── base-eagle-host/            @folio/base-eagle-host     基础 Eagle 集成：ctx.folioEagle（本地 Web API 客户端、缩略图查询、eagle:// 深链接）
 │   ├── base-ui-kit/                @folio/base-ui-kit         基础 UI 组件库：ctx.folioUi、Radix/lucide、.lf-* 样式、Portal/Toast
 │   ├── base-collection-ui/         @folio/base-collection-ui  基础集合视图：虚拟列表、吸顶分组卡片网格、灯箱状态机、本地文件选择弹窗
-│   ├── base-tasks-ui/              @folio/base-tasks-ui       基础后台任务 UI：多 scope SSE 进度订阅与通用状态栏进度条
+│   ├── base-tasks-ui/              @folio/base-tasks-ui       基础后台任务 UI：多 scope SSE 进度订阅、子项明细 Hook 与通用状态栏进度条
 │   ├── base-metadata-ui/           @folio/base-metadata-ui    基础元数据编辑 UI：剪贴板复制、星级评分、标签芯片、自动保存备注
 │   ├── base-shell-ui/              @folio/base-shell-ui       基础外壳：ctx.folioShell（两层工作台 + 工作区栏 + 悬浮面板）
 │   ├── base-frame-ui/              @folio/base-frame-ui       基础布局框架：ctx.folioFrame（四区布局，自身不画界面）
@@ -123,6 +123,7 @@ LocalFolio/
 │   ├── workspace-materials-ui/     @folio/workspace-materials-ui      物料工作区
 │   ├── workspace-projects-host/    @folio/workspace-projects-host     项目库后端（Worker 扫描、.folio-meta、按需缩略图、变更检测）
 │   ├── workspace-projects-ui/      @folio/workspace-projects-ui       项目库工作区（项目卡片总览 + 项目内虚拟化文件网格）
+│   ├── workspace-monitor-ui/       @folio/workspace-monitor-ui        任务监控工作区（持久化账本、子项重试、暂停/停止/继续）
 │   │  ── 测试界面（只进 test-suite）──
 │   ├── test-overview-host/         @folio/test-overview-host  测试概览后端                      ┐
 │   ├── test-overview-ui/           @folio/test-overview-ui    测试概览 UI（形态 A + 悬浮面板）  │
@@ -314,6 +315,9 @@ const session = ctx.folioInteractions.createFileDragSession({ kind: 'url', url, 
 │   └── plugins-manifest.json          # 插件清单 v2（工作台插件 + 内嵌扩展）
 └── plugins\
     ├── base-runtime-host\{data,cache}\
+    ├── base-tasks-host\
+    │   └── data\
+    │       └── tasks.json             # 任务账本：历史、子项状态与可重试项
     ├── workspace-files-host\
     │   └── data\
     │       ├── preferences.json       # 固定的快捷文件夹
@@ -337,4 +341,4 @@ const session = ctx.folioInteractions.createFileDragSession({ kind: 'url', url, 
         └── cache\
 ```
 
-浏览器侧另有 `localStorage` 键，都是**UI 偏好缓存**（业务数据一律落在上面的 `%LOCALAPPDATA%` 目录）：`folio.shell.overlay.v3`（工作台开关状态、当前工作区、悬浮窗位置尺寸）、`folio.frame.v1`（框架内各应用的宽度/折叠/当前应用）与插件自有键（如 `lf.studio.settings.v1`）。
+浏览器侧另有 `localStorage` 键，都是**UI 偏好缓存**（业务数据一律落在上面的 `%LOCALAPPDATA%` 目录）：`folio.shell.overlay.v3`（工作台开关状态、当前工作区、悬浮窗位置尺寸）、`folio.frame.v1`（框架内各应用的宽度/折叠/当前应用）、`folio.monitor.v1`（任务监控的工作区/项目/状态筛选、搜索词与展开项）与插件自有键（如 `lf.studio.settings.v1`）。

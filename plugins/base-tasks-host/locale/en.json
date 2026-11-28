@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Base background tasks",
-    "description": "Provides bounded concurrency queues, Node worker_threads execution, pausable/cancellable task scheduling, and 200ms-throttled SSE progress broadcasting.",
+    "description": "Provides bounded concurrency queues, Node worker_threads execution, pause/stop/resume task scheduling, item-level retry, a persisted task ledger, and 200ms-throttled SSE progress broadcasting.",
     "detail": "docs/DETAIL.md"
   }
 }

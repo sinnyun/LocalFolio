@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Task Monitor",
-    "description": "Track background tasks, progress, and failures by workspace and project."
+    "description": "Track background tasks, progress, and failures by workspace and project, with persisted history plus pause, stop, resume, and per-item retry."
   }
 }

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { Context } from '@deepseek-ai/cordis'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { CaptionActionContribution, FloatingPanelContribution, TaskSnapshot } from '@folio/base-contract'
@@ -59,4 +59,71 @@ it('loads all scopes and shows live partial failures for the selected project', 
   expect(screen.getByText('缩略图：项目乙')).toBeTruthy()
   expect(screen.getByText('部分失败')).toBeTruthy()
   expect(screen.getByText('未生成缩略图')).toBeTruthy()
+})
+
+it('lists failed items and retries only the selected rows', async () => {
+  window.localStorage.clear()
+  const task: TaskSnapshot = {
+    id: 'batch',
+    scope: 'projects',
+    queue: 'archive-ops',
+    title: '批量补图',
+    status: 'completed',
+    progress: { current: 3, total: 3, message: '结束', detail: { succeeded: 1, failed: 2 } },
+    pausable: true,
+    cancellable: true,
+    createdAt: 1,
+    startedAt: 1,
+    updatedAt: 3,
+    finishedAt: 3,
+    error: null,
+    items: { total: 3, pending: 0, running: 0, succeeded: 1, failed: 2, cancelled: 0, skipped: 0 },
+    retryable: true,
+    retry: { kind: 'archive-thumbs', params: { projectId: 'alpha' } },
+    meta: { projectId: 'alpha', projectName: '项目甲' },
+  }
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {}
+    const reply = (data: unknown) => new Response(JSON.stringify({ ok: true, data }))
+    if (url.endsWith('tasks.list')) return reply({ tasks: [task] })
+    if (url.endsWith('tasks.items')) {
+      return reply({
+        taskId: task.id,
+        items: [
+          {
+            key: 'renders/a.jpg',
+            label: 'a.jpg',
+            status: 'failed',
+            error: '未生成缩略图',
+            attempts: 2,
+            updatedAt: 2,
+          },
+        ],
+        total: 1,
+        summary: task.items,
+        truncated: false,
+        requestedStatus: body.status,
+      })
+    }
+    if (url.endsWith('tasks.retry')) return reply({ task: null, source: task, retried: 1 })
+    return reply({})
+  })
+  vi.stubGlobal('fetch', fetch)
+
+  render(<TaskMonitor />)
+  await screen.findByText('批量补图')
+  fireEvent.click(screen.getByText('批量补图'))
+  await screen.findByText('a.jpg')
+
+  fireEvent.click(screen.getByLabelText('选择 a.jpg'))
+  fireEvent.click(screen.getByRole('button', { name: /重试选中/ }))
+
+  await waitFor(() => {
+    const retryCall = fetch.mock.calls.find(([url]) => String(url).endsWith('tasks.retry'))
+    expect(retryCall).toBeTruthy()
+    expect(JSON.parse(String(retryCall?.[1]?.body))).toEqual({
+      id: 'batch',
+      itemKeys: ['renders/a.jpg'],
+    })
+  })
 })
